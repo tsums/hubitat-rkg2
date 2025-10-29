@@ -34,6 +34,7 @@ metadata {
         capability 'SecurityKeypad'
         capability 'Battery'
         capability 'Alarm'
+        capability 'Chime'
         capability 'PowerSource'
         capability 'Motion Sensor'
         capability 'PushableButton'
@@ -60,6 +61,7 @@ metadata {
         attribute 'lastCodeTime', 'STRING'
         attribute 'lastCodeEpochms', 'NUMBER'
         attribute 'motion', 'STRING'
+        attribute 'soundEffects', 'STRING'
         attribute 'validCode', 'ENUM', ['true', 'false']
         attribute 'volAnnouncement', 'NUMBER'
         attribute 'volKeytone', 'NUMBER'
@@ -72,8 +74,8 @@ metadata {
         configParams.each { input it.value.input }
         input name: 'theTone', type: 'enum', title: 'Chime tone', options: [
             ['Tone_1':'(Tone_1) Siren (default)'],
-            ['Tone_2':'(Tone_2) 3 Beeps'],
-            ['Tone_3':'(Tone_3) 4 Beeps'],
+            ['Tone_2':'(Tone_2) Smoke Alarm'],
+            ['Tone_3':'(Tone_3) CO Alarm'],
             ['Tone_4':'(Tone_4) Navi'],
             ['Tone_5':'(Tone_5) Guitar'],
             ['Tone_6':'(Tone_6) Windchimes'],
@@ -107,6 +109,30 @@ metadata {
         0x00: [securityKeypadState: 'armed night', hsmCmd: 'armNight'],
 ]
 @Field static Map CMD_CLASS_VERS = [0x70:1, 0x20:1, 0x86:3, 0x6F:1]
+// These are factory sounds that can't be changed, so just emit them as the supported sound effects.
+@Field static String SOUND_EFFECTS = '{"1":"siren", "2":"smoke alarm", "3":"co alarm", "4":"navi", "5":"guitar", "6":"windchimes", "7":"doorbell 1", "8":"doorbell 2", "9":"invalid code"}'
+@Field static Map SOUND_EFFECTS_TO_INDICATOR_ID = [
+    1: 0x0C, // Siren
+    2: 0x0E, // Smoke Alarm
+    3: 0x0F, // CO Alarm
+    4: 0x60, // Navi
+    5: 0x61, // Guitar
+    6: 0x62, // Windchimes
+    7: 0x63, // Doorbell 1
+    8: 0x64, // Doorbell 2
+    9: 0x09  // Invalid Code
+]
+@Field static Map INDICATOR_ID_TO_PROPERTY_ID = [
+    0x0C: 2, // Siren
+    0x0E: 2, // Smoke Alarm
+    0x0F: 2, // CO Alarm
+    0x60: 0x09, // Navi
+    0x61: 0x09, // Guitar
+    0x62: 0x09, // Windchimes
+    0x63: 0x09, // Doorbell 1
+    0x64: 0x09, // Doorbell 2
+    0x09: 0x01  // Invalid Code
+]
 
 void logsOff() {
     log.warn 'debug logging disabled...'
@@ -148,6 +174,7 @@ void initializeVars() {
     sendEvent(name:'volKeytone', value: 8)
     sendEvent(name:'volSiren', value: 8)
     sendEvent(name:'securityKeypad', value:'disarmed')
+    sendEvent(name:'soundEffects', value:SOUND_EFFECTS)
     state.keypadConfig = [entryDelay:5, exitDelay: 5, armNightDelay:5, armAwayDelay:5, armHomeDelay: 5, codeLength: 4, partialFunction: 'armHome']
     state.keypadStatus = 2
     state.initialized = true
@@ -172,7 +199,7 @@ void refresh() {
     sendToDevice(pollConfigs())
 }
 
-private void pollDeviceData() {
+void pollDeviceData() {
     List<String> cmds = []
     cmds.add(zwave.versionV3.versionGet().format())
     cmds.add(zwave.batteryV1.batteryGet().format())
@@ -198,6 +225,7 @@ private void keypadUpdateStatus(Integer status, String type='digital', String co
 }
 
 // -- Configuration functions. --
+
 void setEntryDelay(delay) {
     if (logEnable) {
         log.debug "In setEntryDelay (${version()}) - delay: ${delay}"
@@ -612,6 +640,30 @@ void entry(entranceDelay) {
     if (entranceDelay) {
         sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x11, propertyId:7, value:entranceDelay.toInteger()]]).format())
     }
+}
+
+// -- Chime Capability Commands
+
+void playSound(soundnumber) {
+    if (logEnable) {
+        log.debug "playSound(${soundnumber})"
+    }
+    volSiren()
+
+    if (SOUND_EFFECTS_TO_INDICATOR_ID[soundnumber.intValue()]) {
+        int playVolume = device.currentValue('volSiren') * 10
+        if (logEnable) {
+            log.debug "Play sound ${soundnumber} at volueme ${playVolume}"
+        }
+        sendSoundCommand(SOUND_EFFECTS_TO_INDICATOR_ID[soundnumber.intValue()], playVolume)
+    } else {
+        log.warn "Sound ${soundnumnber} unsupported."
+    }
+    
+}
+
+void stop() {
+    off()
 }
 
 // -- Alarm Capability Commands --
@@ -1059,7 +1111,7 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
                         }
                         // Indicate 'armingIn' event to HSM. HSM subscribes to this event and will call armAway() after the delay.
                         // If arming fails (bypass failure etc), HSM will not call armAway and we'll return to normal.
-                        sendEvent(name:'armingIn', descriptionText: "Arming HOME mode in ${state.keypadConfig.armAwayDelay} delay", value: state.keypadConfig.armHomeDelay, data:[armMode: armingStates[0x0A].securityKeypadState, armCmd: armingStates[0x0A].hsmCmd], isStateChange:true)
+                        sendEvent(name:'armingIn', descriptionText: "Arming HOME mode in ${state.keypadConfig.armHomeDelay} delay", value: state.keypadConfig.armHomeDelay, data:[armMode: armingStates[0x0A].securityKeypadState, armCmd: armingStates[0x0A].hsmCmd], isStateChange:true)
                     }
                     // TODO: Testing, this is why armNight currently does nothing, the handling for the partialFunction was totally missing.
                     if (state.keypadConfig.partialFunction == 'armNight') {
@@ -1071,7 +1123,7 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
                         }
                         // Indicate 'armingIn' event to HSM. HSM subscribes to this event and will call armAway() after the delay.
                         // If arming fails (bypass failure etc), HSM will not call armAway and we'll return to normal.
-                        sendEvent(name:'armingIn', descriptionText: "Arming NIGHT mode in ${state.keypadConfig.armAwayDelay} delay", value: state.keypadConfig.armNightDelay, data:[armMode: armingStates[0x00].securityKeypadState, armCmd: armingStates[0x00].hsmCmd], isStateChange:true)
+                        sendEvent(name:'armingIn', descriptionText: "Arming NIGHT mode in ${state.keypadConfig.armNightDelay} delay", value: state.keypadConfig.armNightDelay, data:[armMode: armingStates[0x00].securityKeypadState, armCmd: armingStates[0x00].hsmCmd], isStateChange:true)
                     }
                 } else {
                     if (alarmStatus == 'active') {
@@ -1345,65 +1397,66 @@ def playTone(tone=null) {
             log.debug 'In playTone - Tone 1'
         }
         changeStatus('active')
-        sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x0C, propertyId:2, value:sVol]]).format())
+        sendSoundCommand(0x0C, sVol)
     } else if (tone == 'Tone_2') { // 3 chirps
         if (logEnable) {
             log.debug 'In playTone - Tone 2'
         }
         changeStatus('active')
-        sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x0E, propertyId:2, value:sVol]]).format())
+        sendSoundCommand(0x0E, sVol)
     } else if (tone == 'Tone_3') { // 4 chirps
         if (logEnable) {
             log.debug 'In playTone - Tone 3'
         }
         changeStatus('active')
-        sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x0F, propertyId:2, value:sVol]]).format())
+        sendSoundCommand(0x0F, sVol)
     } else if (tone == 'Tone_4') { // Navi
         if (logEnable) {
             log.debug 'In playTone - Tone 4'
         }
         changeStatus('active')
-        sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x60, propertyId:0x09, value:sVol]]).format())
+        sendSoundCommand(0x60, sVol)
     } else if (tone == 'Tone_5') { // Guitar
         if (logEnable) {
             log.debug 'In playTone - Tone 5'
         }
         changeStatus('active')
-        sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x61, propertyId:0x09, value:sVol]]).format())
+        sendSoundCommand(0x61, sVol)
     } else if (tone == 'Tone_6') { // Windchimes
         if (logEnable) {
             log.debug 'In playTone - Tone 6'
         }
         changeStatus('active')
-        sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x62, propertyId:0x09, value:sVol]]).format())
+        sendSoundCommand(0x62, sVol)
     } else if (tone == 'Tone_7') { // Doorbell 1
         if (logEnable) {
             log.debug 'In playTone - Tone 7'
         }
         changeStatus('active')
-        sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x63, propertyId:0x09, value:sVol]]).format())
+        sendSoundCommand(0x63, sVol)
     } else if (tone == 'Tone_8') { // Doorbell 2
         if (logEnable) {
             log.debug 'In playTone - Tone 8'
         }
         changeStatus('active')
-        sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x64, propertyId:0x09, value:sVol]]).format())
+        sendSoundCommand(0x64, sVol)
     } else if (tone == 'Tone_9') { // Invalid Code Sound
         if (logEnable) {
             log.debug 'In playTone - Tone  9'
         }
         changeStatus('active')
-        sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x09, propertyId:0x01, value:sVol]]).format())
-    } else if (tone == 'test') { // test
-        if (logEnable) {
-            log.debug 'In playTone - test'
-        }
-        changeStatus('active')
-        sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x61, propertyId:0x09, value:sVol]]).format())
+        sendSoundCommand(0x09, sVol)
     }
 }
 
 // Common Events
+
+private void sendSoundCommand(soundIndicatorId, volume) {
+    if (logEnable) {
+        log.debug "sendSoundCommand(${soundIndicatorId}, ${volume})"
+    }
+    sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:soundIndicatorId, propertyId:INDICATOR_ID_TO_PROPERTY_ID[soundIndicatorId], value:volume]]).format())
+}
 
 private void notifyInvalidCode() {
     sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x09, propertyId:2, value:0xFF]]).format())
