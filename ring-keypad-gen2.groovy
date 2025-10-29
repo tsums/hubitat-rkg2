@@ -45,7 +45,6 @@ metadata {
         command 'setArmAwayDelay', ['number']
         command 'setArmHomeDelay', ['number']
         command 'setPartialFunction'
-        command 'resetKeypad'
         command 'playTone', [[name: 'Play Tone', type: 'STRING', description: 'Tone_1, Tone_2, etc.']]
         command 'volAnnouncement', [[name:'Announcement Volume', type:'NUMBER', description: 'Volume level (1-10)']]
         command 'volKeytone', [[name:'Keytone Volume', type:'NUMBER', description: 'Volume level (1-10)']]
@@ -116,12 +115,12 @@ void logsOff() {
 
 void updated() {
     log.info 'updated...'
-    log.warn "debug logging is: ${logEnable == true}"
-    log.warn "description logging is: ${txtEnable == true}"
-    log.warn "encryption is: ${optEncrypt == true}"
+    log.info "debug logging is: ${logEnable == true}"
+    log.info "description logging is: ${txtEnable == true}"
+    log.info "encryption is: ${optEncrypt == true}"
     unschedule()
     if (logEnable) {
-        runIn(1800, logsOff)
+        runIn(3600, logsOff)
     }
     sendToDevice(runConfigs())
     updateEncryption()
@@ -135,17 +134,16 @@ void installed() {
     initializeVars()
 }
 
-void uninstalled() {
-}
+void uninstalled() {}
 
 void initializeVars() {
     // first run only
     sendEvent(name:'codeLength', value: 4)
     sendEvent(name:'maxCodes', value: 100)
     sendEvent(name:'lockCodes', value: '')
-    sendEvent(name:'armHomeDelay', value: 5)
-    sendEvent(name:'armAwayDelay', value: 5)
-    sendEvent(name:'armNightDelay', value: 5)
+    sendEvent(name:'armHomeDelay', value: 0)
+    sendEvent(name:'armAwayDelay', value: 15)
+    sendEvent(name:'armNightDelay', value: 0)
     sendEvent(name:'volAnnouncement', value: 8)
     sendEvent(name:'volKeytone', value: 8)
     sendEvent(name:'volSiren', value: 8)
@@ -153,15 +151,6 @@ void initializeVars() {
     state.keypadConfig = [entryDelay:5, exitDelay: 5, armNightDelay:5, armAwayDelay:5, armHomeDelay: 5, codeLength: 4, partialFunction: 'armHome']
     state.keypadStatus = 2
     state.initialized = true
-}
-
-void resetKeypad() {
-    if (logEnable) {
-        log.debug 'resetKeypad()'
-    }
-    state.initialized = false
-    configure()
-    getCodes()
 }
 
 void configure() {
@@ -183,18 +172,18 @@ void refresh() {
     sendToDevice(pollConfigs())
 }
 
-void pollDeviceData() {
+private void pollDeviceData() {
     List<String> cmds = []
     cmds.add(zwave.versionV3.versionGet().format())
-    cmds.add(zwave.manufacturerSpecificV2.deviceSpecificGet(deviceIdType: 1).format())
     cmds.add(zwave.batteryV1.batteryGet().format())
+    cmds.add(zwave.manufacturerSpecificV2.deviceSpecificGet(deviceIdType: 1).format())
     cmds.add(zwave.notificationV8.notificationGet(notificationType: 8, event: 0).format())
     cmds.add(zwave.notificationV8.notificationGet(notificationType: 7, event: 0).format())
-    cmds.addAll(processAssociations())
+    cmds.addAll(setDefaultAssociation())
     sendToDevice(cmds)
 }
 
-void keypadUpdateStatus(Integer status, String type='digital', String code) {
+private void keypadUpdateStatus(Integer status, String type='digital', String code) {
     if (logEnable) {
         log.debug "In keypadUpdateStatus (${version()}) - status: ${status} type: ${type} code: ${code}"
     }
@@ -207,6 +196,90 @@ void keypadUpdateStatus(Integer status, String type='digital', String code) {
     state.code = ''
     state.type = 'digital'
 }
+
+// -- Configuration functions. --
+void setEntryDelay(delay) {
+    if (logEnable) {
+        log.debug "In setEntryDelay (${version()}) - delay: ${delay}"
+    }
+    state.keypadConfig.entryDelay = delay != null ? delay.toInteger() : 0
+}
+
+void setExitDelay(Map delays) {
+    if (logEnable) {
+        log.debug "In setExitDelay (${version()}) - delay: ${delays}"
+    }
+    state.keypadConfig.exitDelay = (delays?.awayDelay ?: 0).toInteger()
+    state.keypadConfig.armNightDelay = (delays?.nightDelay ?: 0).toInteger()
+    state.keypadConfig.armHomeDelay = (delays?.homeDelay ?: 0).toInteger()
+    state.keypadConfig.armAwayDelay = (delays?.awayDelay ?: 0).toInteger()
+}
+
+void setExitDelay(delay) {
+    if (logEnable) {
+        log.debug "In setExitDelay (${version()}) - delay: ${delay}"
+    }
+    state.keypadConfig.exitDelay = delay != null ? delay.toInteger() : 0
+}
+
+void setArmNightDelay(delay) {
+    if (logEnable) {
+        log.debug "In setArmNightDelay (${version()}) - delay: ${delay}"
+    }
+    state.keypadConfig.armNightDelay = delay != null ? delay.toInteger() : 0
+}
+
+void setArmAwayDelay(delay) {
+    if (logEnable) {
+        log.debug "In setArmAwayDelay (${version()}) - delay: ${delay}"
+    }
+    sendEvent(name:'armAwayDelay', value: delay)
+    state.keypadConfig.armAwayDelay = delay != null ? delay.toInteger() : 0
+}
+
+void setArmHomeDelay(delay) {
+    if (logEnable) {
+        log.debug "In setArmHomeDelay (${version()}) - delay: ${delay}"
+    }
+    sendEvent(name:'armHomeDelay', value: delay)
+    state.keypadConfig.armHomeDelay = delay != null ? delay.toInteger() : 0
+}
+
+void setCodeLength(pincodelength) {
+    if (logEnable) {
+        log.debug "In setCodeLength (${version()}) - pincodelength: ${pincodelength}"
+    }
+    eventProcess(name:'codeLength', value: pincodelength, descriptionText: "${device.displayName} codeLength set to ${pincodelength}")
+    state.keypadConfig.codeLength = pincodelength
+    // set zwave entry code key buffer
+    // 6F06XX10
+    sendToDevice('6F06' + hubitat.helper.HexUtils.integerToHexString(pincodelength.toInteger() + 1, 1).padLeft(2, '0') + '0F')
+}
+
+// Used by HSM to configure the partial button arming function.
+void setPartialFunction(mode = null) {
+    if (logEnable) {
+        log.debug "In setPartialFucntion (${version()}) - mode: ${mode}"
+    }
+    if (logEnable) {
+        log.debug "In setPartialFucntion (${version()}) - armingIn: ${state.armingIn}"
+    }
+    if (state.armingIn > 0) {
+        state.armingIn = state.armingIn - 1
+        if (logEnable) {
+            log.debug "In setPartialFucntion (${version()}) - armingIn: ${state.armingIn}"
+        }
+    }
+    if (!(mode in ['armHome', 'armNight'])) {
+        if (txtEnable) {
+            log.warn "Custom command used by HSM: ${mode}"
+        }
+    } else if (mode in ['armHome', 'armNight']) {
+        state.keypadConfig.partialFunction = mode == 'armHome' ? 'armHome' : 'armNight'
+    }
+}
+
+// -- Security Keypad Capaibility --
 
 void armNight(delay=state.keypadConfig.armNightDelay) {
     if (logEnable) {
@@ -517,93 +590,31 @@ void exitDelay(delay) {
     }
 }
 
-def changeStatus(data) {
+private void changeStatus(data) {
     if (logEnable) {
         log.debug "In changeStatus (${version()}) - data: ${data}"
     }
     sendEvent(name: 'alarm', value: data, isStateChange: true)
 }
 
-void setEntryDelay(delay) {
-    if (logEnable) {
-        log.debug "In setEntryDelay (${version()}) - delay: ${delay}"
-    }
-    state.keypadConfig.entryDelay = delay != null ? delay.toInteger() : 0
-}
-
-void setExitDelay(Map delays) {
-    if (logEnable) {
-        log.debug "In setExitDelay (${version()}) - delay: ${delays}"
-    }
-    state.keypadConfig.exitDelay = (delays?.awayDelay ?: 0).toInteger()
-    state.keypadConfig.armNightDelay = (delays?.nightDelay ?: 0).toInteger()
-    state.keypadConfig.armHomeDelay = (delays?.homeDelay ?: 0).toInteger()
-    state.keypadConfig.armAwayDelay = (delays?.awayDelay ?: 0).toInteger()
-}
-
-void setExitDelay(delay) {
-    if (logEnable) {
-        log.debug "In setExitDelay (${version()}) - delay: ${delay}"
-    }
-    state.keypadConfig.exitDelay = delay != null ? delay.toInteger() : 0
-}
-
-void setArmNightDelay(delay) {
-    if (logEnable) {
-        log.debug "In setArmNightDelay (${version()}) - delay: ${delay}"
-    }
-    state.keypadConfig.armNightDelay = delay != null ? delay.toInteger() : 0
-}
-
-void setArmAwayDelay(delay) {
-    if (logEnable) {
-        log.debug "In setArmAwayDelay (${version()}) - delay: ${delay}"
-    }
-    sendEvent(name:'armAwayDelay', value: delay)
-    state.keypadConfig.armAwayDelay = delay != null ? delay.toInteger() : 0
-}
-
-void setArmHomeDelay(delay) {
-    if (logEnable) {
-        log.debug "In setArmHomeDelay (${version()}) - delay: ${delay}"
-    }
-    sendEvent(name:'armHomeDelay', value: delay)
-    state.keypadConfig.armHomeDelay = delay != null ? delay.toInteger() : 0
-}
-void setCodeLength(pincodelength) {
-    if (logEnable) {
-        log.debug "In setCodeLength (${version()}) - pincodelength: ${pincodelength}"
-    }
-    eventProcess(name:'codeLength', value: pincodelength, descriptionText: "${device.displayName} codeLength set to ${pincodelength}")
-    state.keypadConfig.codeLength = pincodelength
-    // set zwave entry code key buffer
-    // 6F06XX10
-    sendToDevice('6F06' + hubitat.helper.HexUtils.integerToHexString(pincodelength.toInteger() + 1, 1).padLeft(2, '0') + '0F')
-}
-
-void setPartialFunction(mode = null) {
-    if (logEnable) {
-        log.debug "In setPartialFucntion (${version()}) - mode: ${mode}"
-    }
-    if (logEnable) {
-        log.debug "In setPartialFucntion (${version()}) - armingIn: ${state.armingIn}"
-    }
-    if (state.armingIn > 0) {
-        state.armingIn = state.armingIn - 1
-        if (logEnable) {
-            log.debug "In setPartialFucntion (${version()}) - armingIn: ${state.armingIn}"
-        }
-    }
-    if (!(mode in ['armHome', 'armNight'])) {
-        if (txtEnable) {
-            log.warn "Custom command used by HSM: ${mode}"
-        }
-    } else if (mode in ['armHome', 'armNight']) {
-        state.keypadConfig.partialFunction = mode == 'armHome' ? 'armHome' : 'armNight'
+// Used by HSM to trigger an entry event.
+void entry() {
+    int intDelay = state.keypadConfig.entryDelay ? state.keypadConfig.entryDelay.toInteger() : 0
+    if (intDelay) {
+        entry(intDelay)
     }
 }
 
-// alarm capability commands
+void entry(entranceDelay) {
+    if (logEnable) {
+        log.debug "In entry (${version()}) - delay: ${entranceDelay}"
+    }
+    if (entranceDelay) {
+        sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x11, propertyId:7, value:entranceDelay.toInteger()]]).format())
+    }
+}
+
+// -- Alarm Capability Commands --
 
 void off() {
     if (logEnable) {
@@ -642,202 +653,7 @@ void strobe() {
     sendToDevice(cmds)
 }
 
-void zwaveEvent(hubitat.zwave.commands.basicv1.BasicReport cmd) {
-    if (logEnable) {
-        log.debug "${cmd}"
-    }
-}
-
-void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification cmd) {
-    if (logEnable) {
-        log.debug "${cmd}"
-    }
-
-    Map ecn = [:]
-    ecn.sequenceNumber = cmd.sequenceNumber
-    ecn.dataType = cmd.dataType
-    ecn.eventType = cmd.eventType
-    def currentStatus = device.currentValue('securityKeypad')
-    def alarmStatus = device.currentValue('alarm')
-    String code = (cmd.eventData.collect { (char) it }.join() as String)
-
-    if (logEnable) {
-        log.debug "Entry control: ${ecn} keycache: ${code}"
-    }
-    switch (ecn.eventType) {
-        // Away Mode Button
-        case 5:
-            if (logEnable) {
-                log.debug 'In case 5 - Away Mode Button'
-            }
-            if (validatePin(code) || instantArming) {
-                if (currentStatus == 'disarmed') {
-                    if (logEnable) {
-                        log.debug "In case 5 - Passed - currentStatus: ${currentStatus}"
-                    }
-                    state.type = 'physical'
-                    if (!state.keypadConfig.armAwayDelay) {
-                        state.keypadConfig.armAwayDelay = 0
-                    }
-                    // Indicate 'armingIn' event to HSM. HSM subscribes to this event and will call armAway() after the delay.
-                    // If arming fails (bypass failure etc), HSM will not call armAway and we'll return to normal.
-                    sendEvent(name:'armingIn', descriptionText: "Arming AWAY mode in ${state.keypadConfig.armAwayDelay} delay", value: state.keypadConfig.armAwayDelay, data:[armMode: armingStates[0x0B].securityKeypadState, armCmd: armingStates[0x0B].hsmCmd], isStateChange:true)
-                } else {
-                    if (logEnable) {
-                        log.debug "In case 5 - Failed - Please Disarm Alarm before changing alarm type - currentStatus: ${currentStatus}"
-                    }
-                }
-            } else {
-                if (logEnable) {
-                    log.debug "In case 5 - Failed - Invalid PIN - currentStatus: ${currentStatus}"
-                }
-                sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x09, propertyId:2, value:0xFF]]).format())
-            }
-            break
-        // Home Mode Button
-        case 6:
-            if (logEnable) {
-                log.debug 'In case 6 - Home Mode Button'
-            }
-            if (validatePin(code) || instantArming) {
-                if (currentStatus == 'disarmed') {
-                    if (logEnable) log.debug 'In case 6 - Passed'
-                    state.type = 'physical'
-                    state.keypadConfig.partialFunction = state.keypadConfig.partialFunctiob ?: 'armHome'
-                    if (state.keypadConfig.partialFunction == 'armHome') {
-                        if (logEnable) {
-                            log.debug 'In case 6 - Partial Passed - Arming Home'
-                        }
-                        if (!state.keypadConfig.armHomeDelay) {
-                            state.keypadConfig.armHomeDelay = 0
-                        }
-                        // Indicate 'armingIn' event to HSM. HSM subscribes to this event and will call armAway() after the delay.
-                        // If arming fails (bypass failure etc), HSM will not call armAway and we'll return to normal.
-                        sendEvent(name:'armingIn', descriptionText: "Arming HOME mode in ${state.keypadConfig.armAwayDelay} delay", value: state.keypadConfig.armHomeDelay, data:[armMode: armingStates[0x0A].securityKeypadState, armCmd: armingStates[0x0A].hsmCmd], isStateChange:true)
-                    }
-                    // TODO: Testing, this is why armNight currently does nothing, the handling for the partialFunction was totally missing.
-                    if (state.keypadConfig.partialFunction == 'armNight') {
-                        if (logEnable) {
-                            log.debug 'In case 6 - Partial Passed - Arming Night'
-                        }
-                        if (!state.keypadConfig.armNightDelay) {
-                            state.keypadConfig.armNightDelay = 0
-                        }
-                        // Indicate 'armingIn' event to HSM. HSM subscribes to this event and will call armAway() after the delay.
-                        // If arming fails (bypass failure etc), HSM will not call armAway and we'll return to normal.
-                        sendEvent(name:'armingIn', descriptionText: "Arming NIGHT mode in ${state.keypadConfig.armAwayDelay} delay", value: state.keypadConfig.armNightDelay, data:[armMode: armingStates[0x00].securityKeypadState, armCmd: armingStates[0x00].hsmCmd], isStateChange:true)
-                    }
-                } else {
-                    if (alarmStatus == 'active') {
-                        if (logEnable) {
-                            log.debug "In case 6 - Silenced - Alarm will sound again in 10 seconds - currentStatus: ${currentStatus}"
-                        }
-                        changeStatus('silent')
-                        runIn(10, changeStatus, [data:'active'])
-                    } else {
-                        if (logEnable) {
-                            log.debug "In case 6 - Failed - Please Disarm Alarm before changing alarm type - currentStatus: ${currentStatus}"
-                        }
-                    }
-                }
-            } else {
-                if (logEnable) {
-                    log.debug "In case 6 - Home Mode Failed - Invalid PIN - currentStatus: ${currentStatus}"
-                }
-                sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x09, propertyId:2, value:0xFF]]).format())
-            }
-            break
-        // Disarm Mode Button
-        case 3:
-            if (logEnable) {
-                log.debug 'In case 3 - Disarm Mode Button'
-            }
-            if (validatePin(code)) {
-                if (logEnable) {
-                    log.debug 'In case 3 - Code Passed'
-                }
-                state.type = 'physical'
-                // Event HSM Subscribes to
-                sendEvent(name:'armingIn', value: 0, descriptionText: 'Disarming after valid code entry', data:[armMode: armingStates[0x02].securityKeypadState, armCmd: armingStates[0x02].hsmCmd], isStateChange:true)
-                keypadUpdateStatus(0x02, state.type, state.code) // Sends status to Keypad to move it to disarmed
-                Date now = new Date()
-                sendEvent(name:'alarmStatusChangeTime', value: "${now}", isStateChange:true)
-                long ems = now.getTime()
-                sendEvent(name:'alarmStatusChangeEpochms', value: "${ems}", isStateChange:true)
-                changeStatus('off')
-                state.armingIn = 0
-                unschedule(armHomeEnd)
-                unschedule(armAwayEnd)
-                unschedule(changeStatus)
-            } else {
-                if (logEnable) {
-                    log.debug "In case 3 - Disarm Failed - Invalid PIN - currentStatus: ${currentStatus}"
-                }
-                sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x09, propertyId:2, value:0xFF]]).format())
-            }
-            break
-        // Code sent after hitting the Check Mark
-        case 2:
-            state.type = 'physical'
-            Date now = new Date()
-            long ems = now.getTime()
-            if (!code) {
-                code = 'check mark'
-            }
-            if (validateCheck) {
-                if (validatePin(code)) {
-                    if (logEnable) {
-                        log.debug 'In case 2 (check mark) - Code Passed'
-                    }
-                } else {
-                    if (logEnable) {
-                        log.debug "In case 2 (check mark) - Code Failed - Invalid PIN - currentStatus: ${currentStatus}"
-                    }
-                    sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x09, propertyId:2, value:0xFF]]).format())
-                }
-            } else {
-                sendEvent(name:'lastCodeName', value: "${code}", isStateChange:true)
-                sendEvent(name:'lastCodeTime', value: "${now}", isStateChange:true)
-                sendEvent(name:'lastCodeEpochms', value: "${ems}", isStateChange:true)
-            }
-            break
-        // Police Button
-        case 17:
-            state.type = 'physical'
-            Date now = new Date()
-            long ems = now.getTime()
-            sendEvent(name:'lastCodeName', value: 'police', isStateChange:true)
-            sendEvent(name:'lastCodeTime', value: "${now}", isStateChange:true)
-            sendEvent(name:'lastCodeEpochms', value: "${ems}", isStateChange:true)
-            sendEvent(name: 'held', value: 11, isStateChange: true)
-            break
-        // Fire Button
-        case 16:
-            state.type = 'physical'
-            Date now = new Date()
-            long ems = now.getTime()
-            sendEvent(name:'lastCodeName', value: 'fire', isStateChange:true)
-            sendEvent(name:'lastCodeTime', value: "${now}", isStateChange:true)
-            sendEvent(name:'lastCodeEpochms', value: "${ems}", isStateChange:true)
-            sendEvent(name: 'held', value: 12, isStateChange: true)
-            break
-        // Medical Button
-        case 19:
-            state.type = 'physical'
-            Date now = new Date()
-            long ems = now.getTime()
-            sendEvent(name:'lastCodeName', value: 'medical', isStateChange:true)
-            sendEvent(name:'lastCodeTime', value: "${now}", isStateChange:true)
-            sendEvent(name:'lastCodeEpochms', value: "${ems}", isStateChange:true)
-            sendEvent(name: 'held', value: 13, isStateChange: true)
-            break
-        // Button pressed or held, idle timeout reached without explicit submission
-        case 1:
-            state.type = 'physical'
-            handleButtons(code)
-            break
-    }
-}
+// -- Button Handling - partial code entry ends up as a security event, we send the button presses here. --
 
 void handleButtons(String code) {
     List<String> buttons = code.split('')
@@ -885,99 +701,6 @@ void hold(btn) {
             sendEvent(name:'lastCodeTime', value: "${now}", isStateChange:true)
             sendEvent(name:'lastCodeEpochms', value: "${ems}", isStateChange:true)
             break
-    }
-}
-
-void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd) {
-    if (logEnable) {
-        log.info "Notification Report: ${cmd}"
-    }
-    Map evt = [:]
-    if (cmd.notificationType == 8) {
-        // power management
-        switch (cmd.event) {
-            case 1:
-                // Power has been applied
-                if (txtEnable) {
-                    log.info "${device.displayName} Power has been applied"
-                }
-                break
-            case 2:
-                // AC mains disconnected
-                evt.name = 'powerSource'
-                evt.value = 'battery'
-                evt.descriptionText = "${device.displayName} AC mains disconnected"
-                eventProcess(evt)
-                break
-            case 3:
-                // AC mains re-connected
-                evt.name = 'powerSource'
-                evt.value = 'mains'
-                evt.descriptionText = "${device.displayName} AC mains re-connected"
-                eventProcess(evt)
-                break
-            case 12:
-                // battery is charging
-                if (txtEnable) {
-                    log.info "${device.displayName} Battery is charging"
-                }
-                break
-        }
-    }
-    else if (cmd.notificationType == 7) {
-        // security
-        if (cmd.event == 8) {
-            // motion active
-            evt.name = 'motion'
-            evt.value = 'active'
-        } else if (cmd.event == 0 && cmd.eventParameter[0] == 8) {
-            // idle event, motion clear
-            evt.name = 'motion'
-            evt.value = 'inactive'
-        }
-        // According to the manual, this is a "Dropped Frame" notification.
-        if (cmd.event == 0 && cmd.notificationStatus == 255) {
-            log.warn "${device.displayName} reports a dropped frame!."
-        } else if (cmd.event == 0 && cmd.notificationStatus == 0) {
-            if (logEnable) {
-                log.debug "${device.displayName} reports that dropped frames condition has cleared."
-            }
-        }
-        else {
-            log.warn "Unhandled Notification (Security): ${cmd}"
-        }
-        // send event if found
-        if (evt.name) {
-            evt.descriptionText = "${device.displayName} ${evt.name} is ${evt.value}"
-            eventProcess(evt)
-        }
-    } else if (cmd.notificationType == 9) {
-        // According to the manual, this is the "System" notification type. 4 is a "software fault".
-        // There are different kinds of faults documented.
-        if (cmd.event == 4) {
-            log.warn "${device.displayName} reports a software fault: ${cmd.eventParameter[0]}: 0x${hubitat.helper.HexUtils.integerToHexString(cmd.eventParameter[0], 1)}."
-        }
-    }
-    else {
-        if (logEnable) {
-            log.debug "Unhandled NotificationReport: ${cmd}"
-        }
-    }
-}
-
-void entry() {
-    int intDelay = state.keypadConfig.entryDelay ? state.keypadConfig.entryDelay.toInteger() : 0
-    if (intDelay) {
-        entry(intDelay)
-    }
-}
-
-void entry(entranceDelay) {
-    if (logEnable) {
-        log.debug "In entry (${version()}) - delay: ${entranceDelay}"
-    }
-    if (entranceDelay) {
-        sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x11, propertyId:7, value:entranceDelay.toInteger()]]).format())
     }
 }
 
@@ -1129,6 +852,8 @@ List<String> configCmd(parameterNumber, size, scaledConfigurationValue) {
     return cmds
 }
 
+// Z-Wave Event Handling
+
 void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) {
     if (configParams[cmd.parameterNumber.toInteger()]) {
         Map configParam = configParams[cmd.parameterNumber.toInteger()]
@@ -1139,8 +864,6 @@ void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) 
         device.updateSetting(configParam.input.name, [value: "${scaledValue}", type: configParam.input.type])
     }
 }
-
-// Battery v1
 
 void zwaveEvent(hubitat.zwave.commands.batteryv1.BatteryReport cmd) {
     Map evt = [name: 'battery', unit: '%']
@@ -1194,19 +917,272 @@ void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
     }
 }
 
-// Association V2
-
-List<String> setDefaultAssociation() {
-    List<String> cmds = []
-    cmds.add(zwave.associationV2.associationSet(groupingIdentifier: 1, nodeId: zwaveHubNodeId).format())
-    cmds.add(zwave.associationV2.associationGet(groupingIdentifier: 1).format())
-    return cmds
+void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd) {
+    if (logEnable) {
+        log.info "Notification Report: ${cmd}"
+    }
+    Map evt = [:]
+    if (cmd.notificationType == 8) {
+        // power management
+        switch (cmd.event) {
+            case 1:
+                // Power has been applied
+                if (txtEnable) {
+                    log.info "${device.displayName} Power has been applied"
+                }
+                break
+            case 2:
+                // AC mains disconnected
+                evt.name = 'powerSource'
+                evt.value = 'battery'
+                evt.descriptionText = "${device.displayName} AC mains disconnected"
+                eventProcess(evt)
+                break
+            case 3:
+                // AC mains re-connected
+                evt.name = 'powerSource'
+                evt.value = 'mains'
+                evt.descriptionText = "${device.displayName} AC mains re-connected"
+                eventProcess(evt)
+                break
+            case 12:
+                // battery is charging
+                if (txtEnable) {
+                    log.info "${device.displayName} Battery is charging"
+                }
+                break
+        }
+    }
+    else if (cmd.notificationType == 7) {
+        // Security (Motion Sensor)
+        if (cmd.event == 8) {
+            // motion active
+            evt.name = 'motion'
+            evt.value = 'active'
+        } else if (cmd.event == 0 && cmd.eventParameter[0] == 8) {
+            // idle event, motion clear
+            evt.name = 'motion'
+            evt.value = 'inactive'
+        } else if (cmd.event == 0 && cmd.notificationStatus == 255) {
+            // According to the manual, this is a "Dropped Frame" notification.
+            log.warn "${device.displayName} reports a dropped frame!."
+        } else if (cmd.event == 0 && cmd.notificationStatus == 0) {
+            log.info "${device.displayName} reports that dropped frames condition has cleared."
+        } else {
+            log.warn "Unhandled Notification (Security): ${cmd}"
+        }
+        // send event if found
+        if (evt.name) {
+            evt.descriptionText = "${device.displayName} ${evt.name} is ${evt.value}"
+            eventProcess(evt)
+        }
+    } else if (cmd.notificationType == 9 && cmd.event == 4) {
+        // According to the manual, this is the "System" notification type. 4 is a "software fault".
+        // There are different kinds of faults documented.
+        log.warn "${device.displayName} reports a software fault: ${cmd.eventParameter[0]}: 0x${hubitat.helper.HexUtils.integerToHexString(cmd.eventParameter[0], 1)}."
+    }
+    else {
+        if (logEnable) {
+            log.debug "Unhandled NotificationReport: ${cmd}"
+        }
+    }
 }
 
-List<String> processAssociations() {
-    List<String> cmds = []
-    cmds.addAll(setDefaultAssociation())
-    return cmds
+void zwaveEvent(hubitat.zwave.commands.basicv1.BasicReport cmd) {
+    if (logEnable) {
+        log.debug "${cmd}"
+    }
+}
+
+void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification cmd) {
+    if (logEnable) {
+        log.debug "${cmd}"
+    }
+
+    Map ecn = [:]
+    ecn.sequenceNumber = cmd.sequenceNumber
+    ecn.dataType = cmd.dataType
+    ecn.eventType = cmd.eventType
+    def currentStatus = device.currentValue('securityKeypad')
+    def alarmStatus = device.currentValue('alarm')
+    String code = (cmd.eventData.collect { (char) it }.join() as String)
+
+    if (logEnable) {
+        log.debug "Entry control: ${ecn} keycache: ${code}"
+    }
+    switch (ecn.eventType) {
+        // Away Mode Button
+        case 5:
+            if (logEnable) {
+                log.debug 'In case 5 - Away Mode Button'
+            }
+            if (validatePin(code) || instantArming) {
+                if (currentStatus == 'disarmed') {
+                    if (logEnable) {
+                        log.debug "In case 5 - Passed - currentStatus: ${currentStatus}"
+                    }
+                    state.type = 'physical'
+                    if (!state.keypadConfig.armAwayDelay) {
+                        state.keypadConfig.armAwayDelay = 0
+                    }
+                    // Indicate 'armingIn' event to HSM. HSM subscribes to this event and will call armAway() after the delay.
+                    // If arming fails (bypass failure etc), HSM will not call armAway and we'll return to normal.
+                    sendEvent(name:'armingIn', descriptionText: "Arming AWAY mode in ${state.keypadConfig.armAwayDelay} delay", value: state.keypadConfig.armAwayDelay, data:[armMode: armingStates[0x0B].securityKeypadState, armCmd: armingStates[0x0B].hsmCmd], isStateChange:true)
+                } else {
+                    if (logEnable) {
+                        log.debug "In case 5 - Failed - Please Disarm Alarm before changing alarm type - currentStatus: ${currentStatus}"
+                    }
+                }
+            } else {
+                if (logEnable) {
+                    log.debug "In case 5 - Failed - Invalid PIN - currentStatus: ${currentStatus}"
+                }
+                notifyInvalidCode()
+            }
+            break
+        // Home Mode Button
+        case 6:
+            if (logEnable) {
+                log.debug 'In case 6 - Home Mode Button'
+            }
+            if (validatePin(code) || instantArming) {
+                if (currentStatus == 'disarmed') {
+                    if (logEnable) log.debug 'In case 6 - Passed'
+                    state.type = 'physical'
+                    state.keypadConfig.partialFunction = state.keypadConfig.partialFunctiob ?: 'armHome'
+                    if (state.keypadConfig.partialFunction == 'armHome') {
+                        if (logEnable) {
+                            log.debug 'In case 6 - Partial Passed - Arming Home'
+                        }
+                        if (!state.keypadConfig.armHomeDelay) {
+                            state.keypadConfig.armHomeDelay = 0
+                        }
+                        // Indicate 'armingIn' event to HSM. HSM subscribes to this event and will call armAway() after the delay.
+                        // If arming fails (bypass failure etc), HSM will not call armAway and we'll return to normal.
+                        sendEvent(name:'armingIn', descriptionText: "Arming HOME mode in ${state.keypadConfig.armAwayDelay} delay", value: state.keypadConfig.armHomeDelay, data:[armMode: armingStates[0x0A].securityKeypadState, armCmd: armingStates[0x0A].hsmCmd], isStateChange:true)
+                    }
+                    // TODO: Testing, this is why armNight currently does nothing, the handling for the partialFunction was totally missing.
+                    if (state.keypadConfig.partialFunction == 'armNight') {
+                        if (logEnable) {
+                            log.debug 'In case 6 - Partial Passed - Arming Night'
+                        }
+                        if (!state.keypadConfig.armNightDelay) {
+                            state.keypadConfig.armNightDelay = 0
+                        }
+                        // Indicate 'armingIn' event to HSM. HSM subscribes to this event and will call armAway() after the delay.
+                        // If arming fails (bypass failure etc), HSM will not call armAway and we'll return to normal.
+                        sendEvent(name:'armingIn', descriptionText: "Arming NIGHT mode in ${state.keypadConfig.armAwayDelay} delay", value: state.keypadConfig.armNightDelay, data:[armMode: armingStates[0x00].securityKeypadState, armCmd: armingStates[0x00].hsmCmd], isStateChange:true)
+                    }
+                } else {
+                    if (alarmStatus == 'active') {
+                        if (logEnable) {
+                            log.debug "In case 6 - Silenced - Alarm will sound again in 10 seconds - currentStatus: ${currentStatus}"
+                        }
+                        changeStatus('silent')
+                        runIn(10, changeStatus, [data:'active'])
+                    } else {
+                        if (logEnable) {
+                            log.debug "In case 6 - Failed - Please Disarm Alarm before changing alarm type - currentStatus: ${currentStatus}"
+                        }
+                    }
+                }
+            } else {
+                if (logEnable) {
+                    log.debug "In case 6 - Home Mode Failed - Invalid PIN - currentStatus: ${currentStatus}"
+                }
+                notifyInvalidCode()
+            }
+            break
+        // Disarm Mode Button
+        case 3:
+            if (logEnable) {
+                log.debug 'In case 3 - Disarm Mode Button'
+            }
+            if (validatePin(code)) {
+                if (logEnable) {
+                    log.debug 'In case 3 - Code Passed'
+                }
+                state.type = 'physical'
+                // Event HSM Subscribes to
+                sendEvent(name:'armingIn', value: 0, descriptionText: 'Disarming after valid code entry', data:[armMode: armingStates[0x02].securityKeypadState, armCmd: armingStates[0x02].hsmCmd], isStateChange:true)
+                keypadUpdateStatus(0x02, state.type, state.code) // Sends status to Keypad to move it to disarmed
+                Date now = new Date()
+                sendEvent(name:'alarmStatusChangeTime', value: "${now}", isStateChange:true)
+                long ems = now.getTime()
+                sendEvent(name:'alarmStatusChangeEpochms', value: "${ems}", isStateChange:true)
+                changeStatus('off')
+                state.armingIn = 0
+                unschedule(armHomeEnd)
+                unschedule(armAwayEnd)
+                unschedule(changeStatus)
+            } else {
+                if (logEnable) {
+                    log.debug "In case 3 - Disarm Failed - Invalid PIN - currentStatus: ${currentStatus}"
+                }
+                notifyInvalidCode()
+            }
+            break
+        // Code sent after hitting the Check Mark
+        case 2:
+            state.type = 'physical'
+            Date now = new Date()
+            long ems = now.getTime()
+            if (!code) {
+                code = 'check mark'
+            }
+            if (validateCheck) {
+                if (validatePin(code)) {
+                    if (logEnable) {
+                        log.debug 'In case 2 (check mark) - Code Passed'
+                    }
+                } else {
+                    if (logEnable) {
+                        log.debug "In case 2 (check mark) - Code Failed - Invalid PIN - currentStatus: ${currentStatus}"
+                    }
+                    notifyInvalidCode()
+                }
+            } else {
+                sendEvent(name:'lastCodeName', value: "${code}", isStateChange:true)
+                sendEvent(name:'lastCodeTime', value: "${now}", isStateChange:true)
+                sendEvent(name:'lastCodeEpochms', value: "${ems}", isStateChange:true)
+            }
+            break
+        // Police Button
+        case 17:
+            state.type = 'physical'
+            Date now = new Date()
+            long ems = now.getTime()
+            sendEvent(name:'lastCodeName', value: 'police', isStateChange:true)
+            sendEvent(name:'lastCodeTime', value: "${now}", isStateChange:true)
+            sendEvent(name:'lastCodeEpochms', value: "${ems}", isStateChange:true)
+            sendEvent(name: 'held', value: 11, isStateChange: true)
+            break
+        // Fire Button
+        case 16:
+            state.type = 'physical'
+            Date now = new Date()
+            long ems = now.getTime()
+            sendEvent(name:'lastCodeName', value: 'fire', isStateChange:true)
+            sendEvent(name:'lastCodeTime', value: "${now}", isStateChange:true)
+            sendEvent(name:'lastCodeEpochms', value: "${ems}", isStateChange:true)
+            sendEvent(name: 'held', value: 12, isStateChange: true)
+            break
+        // Medical Button
+        case 19:
+            state.type = 'physical'
+            Date now = new Date()
+            long ems = now.getTime()
+            sendEvent(name:'lastCodeName', value: 'medical', isStateChange:true)
+            sendEvent(name:'lastCodeTime', value: "${now}", isStateChange:true)
+            sendEvent(name:'lastCodeEpochms', value: "${ems}", isStateChange:true)
+            sendEvent(name: 'held', value: 13, isStateChange: true)
+            break
+        // Button pressed or held, idle timeout reached without explicit submission
+        case 1:
+            state.type = 'physical'
+            handleButtons(code)
+            break
+    }
 }
 
 void zwaveEvent(hubitat.zwave.commands.associationv2.AssociationReport cmd) {
@@ -1220,19 +1196,6 @@ void zwaveEvent(hubitat.zwave.commands.associationv2.AssociationReport cmd) {
         log.debug "Association Report - Group: ${cmd.groupingIdentifier}, Nodes: $temp"
     }
 }
-
-// event filter
-
-void eventProcess(Map evt) {
-    if (txtEnable && evt.descriptionText) {
-        log.info evt.descriptionText
-    }
-    if (device.currentValue(evt.name).toString() != evt.value.toString()) {
-        sendEvent(evt)
-    }
-}
-
-// universal
 
 void zwaveEvent(hubitat.zwave.Command cmd) {
     if (logEnable) {
@@ -1264,27 +1227,17 @@ void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
     sendToDevice(zwave.supervisionV1.supervisionReport(sessionID: cmd.sessionID, reserved: 0, moreStatusUpdates: false, status: 0xFF, duration: 0).format())
 }
 
-void parse(String description) {
+void parse(String event) {
     if (logEnable) {
-        log.debug "parse - ${description}"
+        log.debug "parse - ${event}"
     }
-    hubitat.zwave.Command cmd = zwave.parse(description, CMD_CLASS_VERS)
+    hubitat.zwave.Command cmd = zwave.parse(event, CMD_CLASS_VERS)
     if (cmd) {
         zwaveEvent(cmd)
     }
 }
 
-void sendToDevice(List<String> cmds, Long delay=300) {
-    sendHubCommand(new hubitat.device.HubMultiAction(commands(cmds, delay), hubitat.device.Protocol.ZWAVE))
-}
-
-void sendToDevice(String cmd, Long delay=300) {
-    sendHubCommand(new hubitat.device.HubAction(zwaveSecureEncap(cmd), hubitat.device.Protocol.ZWAVE))
-}
-
-List<String> commands(List<String> cmds, Long delay=300) {
-    return delayBetween(cmds.collect { zwaveSecureEncap(it) }, delay)
-}
+// 
 
 void proximitySensorHandler() {
     if (proximitySensor) {
@@ -1315,7 +1268,9 @@ def volAnnouncement(newVol=null) {
             sendEvent(name:'volAnnouncement', value: newVol, isStateChange:true)
         }
     } else {
-        if (logEnable) log.debug 'Announcement value not specified, so skipping'
+        if (logEnable) {
+            log.debug 'Announcement value not specified, so skipping'
+        }
     }
 }
 
@@ -1338,7 +1293,9 @@ def volKeytone(newVol=null) {
             sendEvent(name:'volKeytone', value: newVol, isStateChange:true)
         }
     } else {
-        if (logEnable) log.debug 'Keytone value not specified, so skipping'
+        if (logEnable) {
+            log.debug 'Keytone value not specified, so skipping'
+        }
     }
 }
 
@@ -1443,5 +1400,45 @@ def playTone(tone=null) {
         }
         changeStatus('active')
         sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x61, propertyId:0x09, value:sVol]]).format())
+    }
+}
+
+// Common Events
+
+private void notifyInvalidCode() {
+    sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x09, propertyId:2, value:0xFF]]).format())
+}
+
+// Helpers to send commands to the devicde.
+
+private void sendToDevice(List<String> cmds, Long delay=300) {
+    sendHubCommand(new hubitat.device.HubMultiAction(commands(cmds, delay), hubitat.device.Protocol.ZWAVE))
+}
+
+private void sendToDevice(String cmd) {
+    sendHubCommand(new hubitat.device.HubAction(zwaveSecureEncap(cmd), hubitat.device.Protocol.ZWAVE))
+}
+
+private List<String> commands(List<String> cmds, Long delay=300) {
+    return delayBetween(cmds.collect { zwaveSecureEncap(it) }, delay)
+}
+
+// General Utility Methods
+
+// Generate association group commands for Group 1 to associate to the hub.
+private List<String> setDefaultAssociation() {
+    List<String> cmds = []
+    cmds.add(zwave.associationV2.associationSet(groupingIdentifier: 1, nodeId: zwaveHubNodeId).format())
+    cmds.add(zwave.associationV2.associationGet(groupingIdentifier: 1).format())
+    return cmds
+}
+
+// Event filter - only emit an event if it represents a change from the current state.
+private void eventProcess(Map evt) {
+    if (txtEnable && evt.descriptionText) {
+        log.info evt.descriptionText
+    }
+    if (device.currentValue(evt.name).toString() != evt.value.toString()) {
+        sendEvent(evt)
     }
 }
