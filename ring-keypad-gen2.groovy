@@ -225,6 +225,10 @@ void pollDeviceData() {
     sendToDevice(cmds)
 }
 
+// Updates the keypad indicator status. This will result in the keypad announcing the status e.g.
+// "Armed and Home", "Disarmed".
+// It would be better to only update the status if we knew it was different, but it seems like
+// The keypad doesn't let us poll for indicator status.
 private void keypadUpdateStatus(Integer status, String type='digital', String code) {
     if (logEnable) {
         log.debug "In keypadUpdateStatus (${version()}) - status: ${status} type: ${type} code: ${code}"
@@ -305,21 +309,12 @@ void setPartialFunction(mode = null) {
     if (logEnable) {
         log.debug "In setPartialFucntion (${version()}) - mode: ${mode}"
     }
-    if (logEnable) {
-        log.debug "In setPartialFucntion (${version()}) - armingIn: ${state.armingIn}"
-    }
-    if (state.armingIn > 0) {
-        state.armingIn = state.armingIn - 1
-        if (logEnable) {
-            log.debug "In setPartialFucntion (${version()}) - armingIn: ${state.armingIn}"
-        }
-    }
     if (!(mode in ['armHome', 'armNight'])) {
         if (txtEnable) {
             log.warn "Custom command used by HSM: ${mode}"
         }
     } else if (mode in ['armHome', 'armNight']) {
-        state.keypadConfig.partialFunction = mode == 'armHome' ? 'armHome' : 'armNight'
+        state.keypadConfig.partialFunction = mode
     }
 }
 
@@ -335,7 +330,7 @@ void armNight(delay=state.keypadConfig.armNightDelay) {
             exitDelay(delay)
             runIn(delay, armNightEnd)
         } else {
-            runIn(delay, armNightEnd)
+            armNightEnd()
         }
     } else {
         if (logEnable) {
@@ -366,7 +361,6 @@ void armAway(delay=state.keypadConfig.armAwayDelay) {
         log.debug "In armAway (${version()}) - delay: ${delay}"
     }
     def sk = device.currentValue('securityKeypad')
-    // Allow compareable variable for added conditions.
     def al = device.currentValue('alarm')
     if (logEnable) {
         log.debug "In armAway (${version()}) - sk: ${sk}"
@@ -420,7 +414,7 @@ void armAway(delay=state.keypadConfig.armAwayDelay) {
             log.debug "In armAway (${version()}) - delay: ${delay}"
         }
         if (sk != 'armed away') {
-            if (delay > 0 ) {
+            if (delay > 0) {
                 exitDelay(delay)
                 runIn(delay, armAwayEnd)
             } else {
@@ -445,7 +439,7 @@ void armAwayEnd() {
     if (logEnable) {
         log.debug "In armAwayEnd (${version()}) - sk: ${sk} code: ${state.code} type: ${state.type} delay: ${delay}"
     }
-    // added conditional handeling for Exit Delay status. for sepreate handeling of delayed exit.
+    // added conditional handling for Exit Delay status. for sepreate handeling of delayed exit.
     if (sk == 'exit delay') {
         if (logEnable) {
             log.debug "In armAwayEnd (${version()}) sk: ${sk} Executing after delayed arming"
@@ -634,11 +628,11 @@ void exitDelay(delay) {
     }
 }
 
-private void changeStatus(data) {
+private void changeStatus(status) {
     if (logEnable) {
-        log.debug "In changeStatus (${version()}) - data: ${data}"
+        log.debug "In changeStatus (${version()}) - new status: ${status}"
     }
-    sendEvent(name: 'alarm', value: data, isStateChange: true)
+    sendEvent(name: 'alarm', value: status, isStateChange: true)
 }
 
 // Used by HSM to trigger an entry event.
