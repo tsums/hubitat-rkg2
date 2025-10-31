@@ -21,6 +21,15 @@
 
 import groovy.transform.Field
 import groovy.json.JsonOutput
+import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_DISARMED
+import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_ARMED_STAY
+import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_ARMED_AWAY
+import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_EXIT_DELAY
+import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_ENTRY_DELAY
+import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_CODE_REJECTED
+import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_ALARM
+import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_ALARM_CO
+import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_ALARM_SMOKE
 
 def version() {
     return '1.4.0'
@@ -93,45 +102,44 @@ metadata {
 }
 
 @Field static Map configParams = [
-        1: [input: [name: 'configParam1', type: 'number', title: 'Heartbeat Interval', description:'Number of minutes in between battery reports.', defaultValue: 70, range:'1..70'], parameterSize:1],
-        7: [input: [name: 'configParam7', type: 'number', title: 'Long press Emergency Duration', description:'', defaultValue: 3, range:'2..5'], parameterSize:1],
-        8: [input: [name: 'configParam8', type: 'number', title: 'Long press Number pad Duration', description:'', defaultValue: 3, range:'2..5'], parameterSize:1],
-        10: [input: [name: 'configParam10', type: 'number', title: 'Button Press Display Timeout', description:'Timeout in seconds when any button is pressed', defaultValue: 5, range:'0..30'], parameterSize:1],
-        11: [input: [name: 'configParam11', type: 'number', title: 'Status Change Display Timeout', description:'Timeout in seconds when indicator command is received from the hub tochange status', defaultValue: 5, range:'0..30'], parameterSize:1],
-        12: [input: [name: 'configParam12', type: 'number', title: 'Security Mode Brightness', description:'', defaultValue: 100, range:'0..100'], parameterSize:1],
-        13: [input: [name: 'configParam13', type: 'number', title: 'Key Backlight Brightness', description:'', defaultValue: 100, range:'0..100'], parameterSize:1],
-        22: [input: [name: 'configParam22', type: 'number', title: 'System Security Mode Display', description:'601 = Always On, 1 - 600 = periodic interval, 0 = Always Off, except activity', defaultValue: 0, range:'0..601'], parameterSize:2],
+    1: [input: [name: 'configParam1', type: 'number', title: 'Heartbeat Interval', description:'Number of minutes in between battery reports.', defaultValue: 70, range:'1..70'], parameterSize:1],
+    7: [input: [name: 'configParam7', type: 'number', title: 'Long press Emergency Duration', description:'', defaultValue: 3, range:'2..5'], parameterSize:1],
+    8: [input: [name: 'configParam8', type: 'number', title: 'Long press Number pad Duration', description:'', defaultValue: 3, range:'2..5'], parameterSize:1],
+    10: [input: [name: 'configParam10', type: 'number', title: 'Button Press Display Timeout', description:'Timeout in seconds when any button is pressed', defaultValue: 5, range:'0..30'], parameterSize:1],
+    11: [input: [name: 'configParam11', type: 'number', title: 'Status Change Display Timeout', description:'Timeout in seconds when indicator command is received from the hub tochange status', defaultValue: 5, range:'0..30'], parameterSize:1],
+    12: [input: [name: 'configParam12', type: 'number', title: 'Security Mode Brightness', description:'', defaultValue: 100, range:'0..100'], parameterSize:1],
+    13: [input: [name: 'configParam13', type: 'number', title: 'Key Backlight Brightness', description:'', defaultValue: 100, range:'0..100'], parameterSize:1],
+    22: [input: [name: 'configParam22', type: 'number', title: 'System Security Mode Display', description:'601 = Always On, 1 - 600 = periodic interval, 0 = Always Off, except activity', defaultValue: 0, range:'0..601'], parameterSize:2],
 ]
 @Field static Map armingStates = [
-        0x02: [securityKeypadState: 'disarmed', hsmCmd: 'disarm'],
-        0x0A: [securityKeypadState: 'armed home', hsmCmd: 'armHome'],
-        0x0B: [securityKeypadState: 'armed away', hsmCmd: 'armAway'],
-        0x00: [securityKeypadState: 'armed night', hsmCmd: 'armNight'],
+    (INDICATOR_TYPE_DISARMED):[securityKeypadState: 'disarmed', hsmCmd: 'disarm'],
+    (INDICATOR_TYPE_ARMED_STAY): [securityKeypadState: 'armed home', hsmCmd: 'armHome'],
+    (INDICATOR_TYPE_ARMED_AWAY): [securityKeypadState: 'armed away', hsmCmd: 'armAway'],
 ]
 @Field static Map CMD_CLASS_VERS = [0x70:1, 0x20:1, 0x86:3, 0x6F:1]
 // These are factory sounds that can't be changed, so just emit them as the supported sound effects.
 @Field static String SOUND_EFFECTS = '{"1":"siren", "2":"smoke alarm", "3":"co alarm", "4":"navi", "5":"guitar", "6":"windchimes", "7":"doorbell 1", "8":"doorbell 2", "9":"invalid code"}'
 @Field static Map SOUND_EFFECTS_TO_INDICATOR_ID = [
-    1: 0x0C, // Siren
-    2: 0x0E, // Smoke Alarm
-    3: 0x0F, // CO Alarm
+    1: INDICATOR_TYPE_ALARM, // Siren
+    2: INDICATOR_TYPE_ALARM_SMOKE, // Smoke Alarm
+    3: INDICATOR_TYPE_ALARM_CO, // CO Alarm
     4: 0x60, // Navi
     5: 0x61, // Guitar
     6: 0x62, // Windchimes
     7: 0x63, // Doorbell 1
     8: 0x64, // Doorbell 2
-    9: 0x09  // Invalid Code
+    9: INDICATOR_TYPE_CODE_REJECTED  // Invalid Code
 ]
 @Field static Map INDICATOR_ID_TO_PROPERTY_ID = [
-    0x0C: 2, // Siren
-    0x0E: 2, // Smoke Alarm
-    0x0F: 2, // CO Alarm
+    (INDICATOR_TYPE_ALARM): 2, // Siren
+    (INDICATOR_TYPE_ALARM_SMOKE): 2, // Smoke Alarm
+    (INDICATOR_TYPE_ALARM_CO): 2, // CO Alarm
     0x60: 0x09, // Navi
     0x61: 0x09, // Guitar
     0x62: 0x09, // Windchimes
     0x63: 0x09, // Doorbell 1
     0x64: 0x09, // Doorbell 2
-    0x09: 0x01  // Invalid Code
+    (INDICATOR_TYPE_CODE_REJECTED): 0x01  // Invalid Code
 ]
 
 void logsOff() {
@@ -176,7 +184,7 @@ void initializeVars() {
     sendEvent(name:'securityKeypad', value:'disarmed')
     sendEvent(name:'soundEffects', value:SOUND_EFFECTS)
     state.keypadConfig = [entryDelay:5, exitDelay: 5, armNightDelay:5, armAwayDelay:5, armHomeDelay: 5, codeLength: 4, partialFunction: 'armHome']
-    state.keypadStatus = 2
+    state.keypadStatus = INDICATOR_TYPE_DISARMED
     state.initialized = true
 }
 
@@ -206,6 +214,13 @@ void pollDeviceData() {
     cmds.add(zwave.manufacturerSpecificV2.deviceSpecificGet(deviceIdType: 1).format())
     cmds.add(zwave.notificationV8.notificationGet(notificationType: 8, event: 0).format())
     cmds.add(zwave.notificationV8.notificationGet(notificationType: 7, event: 0).format())
+    // TODO: Trying to figure out if it will tell us the state of the indicators, but it seems like ... no?
+    // All of the reports that come back are missing property 2...
+    cmds.add(zwave.indicatorV3.indicatorGet(indicatorId: INDICATOR_TYPE_ALARM).format())
+    cmds.add(zwave.indicatorV3.indicatorGet(indicatorId: INDICATOR_TYPE_DISARMED).format())
+    cmds.add(zwave.indicatorV3.indicatorGet(indicatorId: INDICATOR_TYPE_ARMED_AWAY).format())
+    cmds.add(zwave.indicatorV3.indicatorGet(indicatorId: INDICATOR_TYPE_ARMED_STAY).format())
+    cmds.add(zwave.indicatorV3.indicatorSupportedGet(indicatorId: INDICATOR_TYPE_DISARMED).format())
     cmds.addAll(setDefaultAssociation())
     sendToDevice(cmds)
 }
@@ -219,7 +234,8 @@ private void keypadUpdateStatus(Integer status, String type='digital', String co
     if (state.code != '') {
         type = 'physical'
     }
-    eventProcess(name: 'securityKeypad', value: armingStates[status].securityKeypadState, type: type, data: state.code)
+    // TODO figure out if I can remove the Short cast??? Maps are annoying.
+    eventProcess(name: 'securityKeypad', value: armingStates[status as Short].securityKeypadState, type: type, data: state.code)
     state.code = ''
     state.type = 'digital'
 }
@@ -364,7 +380,7 @@ void armAway(delay=state.keypadConfig.armAwayDelay) {
                     log.debug "In armAway (${version()}) alarm: ${al} - Validation for first digital submit"
                 }
                 // Event HSM Subscribes to
-                sendEvent(name:'armingIn', value: state.keypadConfig.armAwayDelay, data:[armMode: armingStates[0x0B].securityKeypadState, armCmd: armingStates[0x0B].hsmCmd], isStateChange:true)
+                sendEvent(name:'armingIn', value: state.keypadConfig.armAwayDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_AWAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_AWAY].hsmCmd], isStateChange:true)
                 // Set variable to for second digital submit
                 changeStatus('armingAway')
                 if (logEnable) log.debug "In armAway (${version()}) - armingIn: ${state.armingIn}"
@@ -435,7 +451,7 @@ void armAwayEnd() {
             log.debug "In armAwayEnd (${version()}) sk: ${sk} Executing after delayed arming"
         }
         Date now = new Date()
-        keypadUpdateStatus(0x0B, state.type, state.code)
+        keypadUpdateStatus(INDICATOR_TYPE_ARMED_AWAY, state.type, state.code)
         sendEvent(name:'alarmStatusChangeTime', value: "${now}", isStateChange:true)
         long ems = now.getTime()
         sendEvent(name:'alarmStatusChangeEpochms', value: "${ems}", isStateChange:true)
@@ -446,10 +462,10 @@ void armAwayEnd() {
             log.debug "In armAwayEnd (${version()}) sk: ${sk} Executing immediate arming"
         }
         Date now = new Date()
-        keypadUpdateStatus(0x0B, state.type, state.code)
+        keypadUpdateStatus(INDICATOR_TYPE_ARMED_AWAY, state.type, state.code)
         if (state.type == 'digital') {
             // Event HSM Subscribes to
-            sendEvent(name:'armingIn', value: state.keypadConfig.armAwayDelay, data:[armMode: armingStates[0x0B].securityKeypadState, armCmd: armingStates[0x0B].hsmCmd], isStateChange:true)
+            sendEvent(name:'armingIn', value: state.keypadConfig.armAwayDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_AWAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_AWAY].hsmCmd], isStateChange:true)
         }
         sendEvent(name:'alarmStatusChangeTime', value: "${now}", isStateChange:true)
         long ems = now.getTime()
@@ -474,7 +490,7 @@ void armHome(delay = state.keypadConfig.armHomeDelay) {
                     log.debug "In armHome (${version()}) alarm: ${al} - Validation for first digital submit"
                 }
                 // Event for HSM.
-                sendEvent(name:'armingIn', value: state.keypadConfig.armHomeDelay, data:[armMode: armingStates[0x0A].securityKeypadState, armCmd: armingStates[0x0A].hsmCmd], isStateChange:true)
+                sendEvent(name:'armingIn', value: state.keypadConfig.armHomeDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_STAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_STAY].hsmCmd], isStateChange:true)
                 // Set variable to for second digital submit
                 changeStatus('armingHome')
                 if (logEnable) {
@@ -529,7 +545,7 @@ void armHomeEnd() {
             log.debug "In armHomeEnd (${version()}) sk: ${sk} Executing after delayed arming"
         }
         Date now = new Date()
-        keypadUpdateStatus(0x0A, state.type, state.code)
+        keypadUpdateStatus(INDICATOR_TYPE_ARMED_STAY, state.type, state.code)
         sendEvent(name:'alarmStatusChangeTime', value: "${now}", isStateChange:true)
         long ems = now.getTime()
         sendEvent(name:'alarmStatusChangeEpochms', value: "${ems}", isStateChange:true)
@@ -541,10 +557,10 @@ void armHomeEnd() {
             log.debug "In armHomeEnd (${version()}) sk: ${sk} Executing immediate arming"
         }
         Date now = new Date()
-        keypadUpdateStatus(0x0A, state.type, state.code)
+        keypadUpdateStatus(INDICATOR_TYPE_ARMED_STAY, state.type, state.code)
         if (state.type == 'digital') {
             // Event for HSM.
-            sendEvent(name:'armingIn', value: state.keypadConfig.armHomeDelay, data:[armMode: armingStates[0x0A].securityKeypadState, armCmd: armingStates[0x0A].hsmCmd], isStateChange:true)
+            sendEvent(name:'armingIn', value: state.keypadConfig.armHomeDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_STAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_STAY].hsmCmd], isStateChange:true)
         }
         sendEvent(name:'alarmStatusChangeTime', value: "${now}", isStateChange:true)
         long ems = now.getTime()
@@ -589,7 +605,7 @@ void disarmEnd() {
     }
     if (sk != 'disarmed') {
         Date now = new Date()
-        keypadUpdateStatus(0x02, state.type, state.code)  // Sends status to Keypad
+        keypadUpdateStatus(INDICATOR_TYPE_DISARMED, state.type, state.code)  // Sends status to Keypad
         sendLocationEvent(name: 'hsmSetArm', value: 'disarm')
         sendEvent(name:'alarmStatusChangeTime', value: "${now}", isStateChange:true)
         long ems = now.getTime()
@@ -607,9 +623,9 @@ void exitDelay(delay) {
         log.debug "In exitDelay (${version()}) - delay: ${delay}"
     }
     if (delay) {
-        sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x12, propertyId:7, value:delay.toInteger()]]).format())
+        sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:INDICATOR_TYPE_EXIT_DELAY, propertyId:7, value:delay.toInteger()]]).format())
         // update state so that a disarm command during the exit delay resets the indicator lights
-        state.keypadStatus = '18'
+        state.keypadStatus = INDICATOR_TYPE_EXIT_DELAY
         type = state.code != '' ? 'physical' : 'digital'
         eventProcess(name: 'securityKeypad', value: 'exit delay', type: type, data: state.code)
         if (logEnable) {
@@ -638,7 +654,7 @@ void entry(entranceDelay) {
         log.debug "In entry (${version()}) - delay: ${entranceDelay}"
     }
     if (entranceDelay) {
-        sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x11, propertyId:7, value:entranceDelay.toInteger()]]).format())
+        sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:INDICATOR_TYPE_ENTRY_DELAY, propertyId:7, value:entranceDelay.toInteger()]]).format())
     }
 }
 
@@ -690,19 +706,15 @@ void siren() {
     }
     eventProcess(name:'alarm', value:'siren')
     changeStatus('siren')
-    sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x0C, propertyId:2, value:0xFF]]).format())
+    sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:INDICATOR_TYPE_ALARM, propertyId:2, value:0xFF]]).format())
 }
 
 void strobe() {
     if (logEnable) {
         log.debug "In strobe (${version()})"
     }
-    eventProcess(name:'alarm', value:'strobe')
-    changeStatus('strobe')
-    List<String> cmds = []
-    cmds.add(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x0C, propertyId:2, value:0xFF]]).format())
-    cmds.add(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x0C, propertyId:2, value:0x00]]).format())
-    sendToDevice(cmds)
+    // The keypad doesn't support strobing without siren. So we'll just use siren() here.
+    siren()
 }
 
 // -- Button Handling - partial code entry ends up as a security event, we send the button presses here. --
@@ -1079,7 +1091,7 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
                     }
                     // Indicate 'armingIn' event to HSM. HSM subscribes to this event and will call armAway() after the delay.
                     // If arming fails (bypass failure etc), HSM will not call armAway and we'll return to normal.
-                    sendEvent(name:'armingIn', descriptionText: "Arming AWAY mode in ${state.keypadConfig.armAwayDelay} delay", value: state.keypadConfig.armAwayDelay, data:[armMode: armingStates[0x0B].securityKeypadState, armCmd: armingStates[0x0B].hsmCmd], isStateChange:true)
+                    sendEvent(name:'armingIn', descriptionText: "Arming AWAY mode in ${state.keypadConfig.armAwayDelay} delay", value: state.keypadConfig.armAwayDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_AWAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_AWAY].hsmCmd], isStateChange:true)
                 } else {
                     if (logEnable) {
                         log.debug "In case 5 - Failed - Please Disarm Alarm before changing alarm type - currentStatus: ${currentStatus}"
@@ -1111,20 +1123,9 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
                         }
                         // Indicate 'armingIn' event to HSM. HSM subscribes to this event and will call armAway() after the delay.
                         // If arming fails (bypass failure etc), HSM will not call armAway and we'll return to normal.
-                        sendEvent(name:'armingIn', descriptionText: "Arming HOME mode in ${state.keypadConfig.armHomeDelay} delay", value: state.keypadConfig.armHomeDelay, data:[armMode: armingStates[0x0A].securityKeypadState, armCmd: armingStates[0x0A].hsmCmd], isStateChange:true)
+                        sendEvent(name:'armingIn', descriptionText: "Arming HOME mode in ${state.keypadConfig.armHomeDelay} delay", value: state.keypadConfig.armHomeDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_STAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_STAY].hsmCmd], isStateChange:true)
                     }
-                    // TODO: Testing, this is why armNight currently does nothing, the handling for the partialFunction was totally missing.
-                    if (state.keypadConfig.partialFunction == 'armNight') {
-                        if (logEnable) {
-                            log.debug 'In case 6 - Partial Passed - Arming Night'
-                        }
-                        if (!state.keypadConfig.armNightDelay) {
-                            state.keypadConfig.armNightDelay = 0
-                        }
-                        // Indicate 'armingIn' event to HSM. HSM subscribes to this event and will call armAway() after the delay.
-                        // If arming fails (bypass failure etc), HSM will not call armAway and we'll return to normal.
-                        sendEvent(name:'armingIn', descriptionText: "Arming NIGHT mode in ${state.keypadConfig.armNightDelay} delay", value: state.keypadConfig.armNightDelay, data:[armMode: armingStates[0x00].securityKeypadState, armCmd: armingStates[0x00].hsmCmd], isStateChange:true)
-                    }
+                    // TODO: Fix armNight functionality.
                 } else {
                     if (alarmStatus == 'active') {
                         if (logEnable) {
@@ -1156,8 +1157,8 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
                 }
                 state.type = 'physical'
                 // Event HSM Subscribes to
-                sendEvent(name:'armingIn', value: 0, descriptionText: 'Disarming after valid code entry', data:[armMode: armingStates[0x02].securityKeypadState, armCmd: armingStates[0x02].hsmCmd], isStateChange:true)
-                keypadUpdateStatus(0x02, state.type, state.code) // Sends status to Keypad to move it to disarmed
+                sendEvent(name:'armingIn', value: 0, descriptionText: 'Disarming after valid code entry', data:[armMode: armingStates[INDICATOR_TYPE_DISARMED].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_DISARMED].hsmCmd], isStateChange:true)
+                keypadUpdateStatus(INDICATOR_TYPE_DISARMED, state.type, state.code) // Sends status to Keypad to move it to disarmed
                 Date now = new Date()
                 sendEvent(name:'alarmStatusChangeTime', value: "${now}", isStateChange:true)
                 long ems = now.getTime()
@@ -1393,59 +1394,26 @@ def playTone(tone=null) {
         }
     }
     if (tone == 'Tone_1') { // Siren
-        if (logEnable) {
-            log.debug 'In playTone - Tone 1'
-        }
         changeStatus('active')
-        sendSoundCommand(0x0C, sVol)
-    } else if (tone == 'Tone_2') { // 3 chirps
-        if (logEnable) {
-            log.debug 'In playTone - Tone 2'
-        }
+        sendSoundCommand(INDICATOR_TYPE_ALARM, sVol)
+    } else if (tone == 'Tone_2') { // Smoke
         changeStatus('active')
-        sendSoundCommand(0x0E, sVol)
-    } else if (tone == 'Tone_3') { // 4 chirps
-        if (logEnable) {
-            log.debug 'In playTone - Tone 3'
-        }
+        sendSoundCommand(INDICATOR_TYPE_ALARM_SMOKE, sVol)
+    } else if (tone == 'Tone_3') { // CO
         changeStatus('active')
-        sendSoundCommand(0x0F, sVol)
+        sendSoundCommand(INDICATOR_TYPE_ALARM_CO, sVol)
     } else if (tone == 'Tone_4') { // Navi
-        if (logEnable) {
-            log.debug 'In playTone - Tone 4'
-        }
-        changeStatus('active')
         sendSoundCommand(0x60, sVol)
     } else if (tone == 'Tone_5') { // Guitar
-        if (logEnable) {
-            log.debug 'In playTone - Tone 5'
-        }
-        changeStatus('active')
         sendSoundCommand(0x61, sVol)
     } else if (tone == 'Tone_6') { // Windchimes
-        if (logEnable) {
-            log.debug 'In playTone - Tone 6'
-        }
-        changeStatus('active')
         sendSoundCommand(0x62, sVol)
     } else if (tone == 'Tone_7') { // Doorbell 1
-        if (logEnable) {
-            log.debug 'In playTone - Tone 7'
-        }
-        changeStatus('active')
         sendSoundCommand(0x63, sVol)
     } else if (tone == 'Tone_8') { // Doorbell 2
-        if (logEnable) {
-            log.debug 'In playTone - Tone 8'
-        }
-        changeStatus('active')
         sendSoundCommand(0x64, sVol)
     } else if (tone == 'Tone_9') { // Invalid Code Sound
-        if (logEnable) {
-            log.debug 'In playTone - Tone  9'
-        }
-        changeStatus('active')
-        sendSoundCommand(0x09, sVol)
+        sendSoundCommand(INDICATOR_TYPE_CODE_REJECTED, sVol)
     }
 }
 
@@ -1459,7 +1427,7 @@ private void sendSoundCommand(soundIndicatorId, volume) {
 }
 
 private void notifyInvalidCode() {
-    sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:0x09, propertyId:2, value:0xFF]]).format())
+    sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:INDICATOR_TYPE_CODE_REJECTED, propertyId:2, value:0xFF]]).format())
 }
 
 // Helpers to send commands to the devicde.
