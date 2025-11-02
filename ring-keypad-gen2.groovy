@@ -139,9 +139,10 @@ metadata {
     22: [input: [name: 'configParam22', type: 'number', title: 'System Security Mode Display', description:'601 = Always On, 1 - 600 = periodic interval, 0 = Always Off, except activity', defaultValue: 0, range:'0..601'], parameterSize:2],
 ]
 @Field static Map armingStates = [
-    (INDICATOR_TYPE_DISARMED): [securityKeypadState: (SECURITY_KEYPAD_DISARMED), hsmCmd: 'disarm'],
-    (INDICATOR_TYPE_ARMED_STAY): [securityKeypadState: (SECURITY_KEYPAD_ARMED_HOME), hsmCmd: 'armHome'],
-    (INDICATOR_TYPE_ARMED_AWAY): [securityKeypadState: (SECURITY_KEYPAD_ARMED_AWAY), hsmCmd: 'armAway'],
+    // TODO figure out why I can't reference e.g. SECURITY_KEYPAD_ARMED_AWAY here - something with static initialization order?
+    (INDICATOR_TYPE_DISARMED): [securityKeypadState: 'disarmed', hsmCmd: 'disarm'],
+    (INDICATOR_TYPE_ARMED_STAY): [securityKeypadState: 'armed home', hsmCmd: 'armHome'],
+    (INDICATOR_TYPE_ARMED_AWAY): [securityKeypadState: 'armed away', hsmCmd: 'armAway'],
 ]
 @Field static Map CMD_CLASS_VERS = [0x70:1, 0x20:1, 0x86:3, 0x6F:1]
 // These are factory sounds that can't be changed, so just emit them as the supported sound effects.
