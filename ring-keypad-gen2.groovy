@@ -1,8 +1,11 @@
 /*
-    Ring Keypad Gen 2 - Community Driver
+    Ring Keypad Gen 2 - HSM Driver
 
     Copyright 2020 -> 2021 Hubitat Inc.  All Rights Reserved
     Special Thanks to Bryan Copeland (@bcopeland) for writing and releasing this code to the community!
+
+    Note: This fork of the community driver only supports HSM integration. The keypad will **not** change
+          state on its own, it expects callbacks from HSM to correctly perform state transitions.
 
     1.4.0 - 10/28/25 - Format code, improve comments and debug logging, improve function naming and
                        variable names. Improve HSM integration and fix misc. bugs. Add chime capability. 
@@ -57,6 +60,13 @@ import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVE
 @Field static String SECURITY_KEYPAD_ARMED_HOME = "armed home"
 @Field static String SECURITY_KEYPAD_ARMED_NIGHT = "armed night"
 @Field static String SECURITY_KEYPAD_DISARMED = "disarmed"
+@Field static String SECURITY_KEYPAD_EXIT_DELAY = "exit delay"
+
+// TODO: The driver is using these for the 'alarm' attribute,
+// but that should really just be ["strobe", "off", "both", "siren"].
+// Maybe we should move these into state information instead?
+@Field static String ALARM_STATUS_ARMING_HOME = "armingHome"
+@Field static String ALARM_STATUS_ARMING_AWAY = "armingAway"
 
 def version() {
     return '1.4.0'
@@ -399,11 +409,11 @@ void armAway(delay=state.keypadConfig.armAwayDelay) {
     }
     if (sk != SECURITY_KEYPAD_ARMED_AWAY) {
         if (delay > 0) {
-            // If we're already armingAway, don't dispatch any events. This happens when
+            // If we're already arming Away, don't dispatch any events. This happens when
             // HSM sends a duplicate event during delayed arming.
-            if (al == 'armingAway') {
+            if (al == ALARM_STATUS_ARMING_AWAY) {
                 if (logEnable) {
-                    log.debug "armAway | Already armingAway, not dispatching any events."
+                    log.debug "armAway | Already ${ALARM_STATUS_ARMING_AWAY}, not dispatching any events."
                 }
             } else {
                 if (logEnable) {
@@ -411,7 +421,7 @@ void armAway(delay=state.keypadConfig.armAwayDelay) {
                 }
                 state.armingIn = delay
                 // Change status to avoid looping.
-                changeStatus('armingAway')
+                changeStatus(ALARM_STATUS_ARMING_AWAY)
                 if (state.type == 'digital') {
                     // If this was a digital event, then we didn't trigger HSM during the processing
                     // of the EntryControlNotification. Trigger HSM to begin arming.
@@ -444,31 +454,27 @@ void armAwayEnd() {
     if (logEnable) {
         log.debug "armAwayEnd | sk: ${sk} code: ${state.code} type: ${state.type} delay: ${delay}"
     }
-    // added conditional handling for Exit Delay status. for sepreate handeling of delayed exit.
-    if (sk == 'exit delay') {
+    if (sk != SECURITY_KEYPAD_ARMED_AWAY) {
         if (logEnable) {
-            log.debug "armAwayEnd | sk: ${sk} Executing after delayed arming"
+            log.debug "armAwayEnd | arming now."
         }
         keypadUpdateStatus(INDICATOR_TYPE_ARMED_AWAY, state.type, state.code)
         alarmStatusChangeNow()
         changeStatus('set')
         state.armingIn = 0
-    } else if (sk != SECURITY_KEYPAD_ARMED_AWAY) {
-        if (logEnable) {
-            log.debug "armAwayEnd | sk: ${sk} Executing immediate arming"
-        }
-        Date now = new Date()
-        keypadUpdateStatus(INDICATOR_TYPE_ARMED_AWAY, state.type, state.code)
+
         if (state.type == 'digital') {
             // Send the HSM event indicating immediate arming.
             // TODO: Do we need this? It seems redundant, maybe it wouldn't have sent in armAway if digital and no delay?
             sendEvent(name:'armingIn', value: state.keypadConfig.armAwayDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_AWAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_AWAY].hsmCmd], isStateChange:true)
         }
-        changeStatus('set')
-        state.armingIn = 0
     }
 }
 
+// armHome is intended to be called by HSM in response to an armingIn event change.
+// It is also possible to directly invoke a digital armHome command on the keypad.
+// This method needs to determine whether to invoke HSM, or if it was invoked _by_ HSM,
+// in order to avoid duplicate events.
 void armHome(delay = state.keypadConfig.armHomeDelay) {
     def sk = device.currentValue('securityKeypad')
     def al = device.currentValue('alarm')
@@ -478,11 +484,11 @@ void armHome(delay = state.keypadConfig.armHomeDelay) {
     }
     if (sk != SECURITY_KEYPAD_ARMED_HOME) {
         if (delay > 0) {
-            // If we're already armingHome, don't dispatch any events. This happens when
+            // If we're already arming home, don't dispatch any events. This happens when
             // HSM sends a duplicate event during delayed arming.
-            if (al == 'armingHome') {
+            if (al == ALARM_STATUS_ARMING_HOME) {
                 if (logEnable) {
-                    log.debug "armHome | Already armingHome, not dispatching any events."
+                    log.debug "armHome | Already ${ALARM_STATUS_ARMING_HOME}, not dispatching any events."
                 }
                 return
             } else {
@@ -491,7 +497,7 @@ void armHome(delay = state.keypadConfig.armHomeDelay) {
                 }
                 state.armingIn = delay
                 // Change status to avoid looping.
-                changeStatus('armingHome')
+                changeStatus(ALARM_STATUS_ARMING_HOME)
                 if (logEnable) {
                     log.debug "armHome | - armingIn: ${state.armingIn}"
                 }
@@ -528,27 +534,19 @@ void armHomeEnd() {
     if (logEnable) {
         log.debug "armHomeEnd | sk: ${sk} code: ${state.code} type: ${state.type} delay: ${delay}"
     }
-    if (sk == 'exit delay') {
+    if (sk != SECURITY_KEYPAD_ARMED_HOME) {
         if (logEnable) {
-            log.debug "armHomeEnd | Executing after delayed arming"
+            log.debug "armHomeEnd | Finishing arming."
         }
         keypadUpdateStatus(INDICATOR_TYPE_ARMED_STAY, state.type, state.code)
         alarmStatusChangeNow()
         changeStatus('set')
         state.armingIn = 0
-    }
-    else if (sk != 'armed home') {
-        if (logEnable) {
-            log.debug "armHomeEnd | Executing immediate arming"
-        }
-        keypadUpdateStatus(INDICATOR_TYPE_ARMED_STAY, state.type, state.code)
         if (state.type == 'digital') {
-            // Event for HSM.
+            // Send the HSM event indicating immediate arming.
+            // TODO: Do we need this? It seems redundant, maybe it wouldn't have sent in armAway if digital and no delay?
             sendEvent(name:'armingIn', value: state.keypadConfig.armHomeDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_STAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_STAY].hsmCmd], isStateChange:true)
         }
-        alarmStatusChangeNow()
-        changeStatus('set')
-        state.armingIn = 0
     }
 }
 
@@ -594,7 +592,7 @@ void exitDelay(delay) {
         // update state so that a disarm command during the exit delay resets the indicator lights
         state.keypadStatus = INDICATOR_TYPE_EXIT_DELAY
         type = state.code != '' ? 'physical' : 'digital'
-        eventProcess(name: 'securityKeypad', value: 'exit delay', type: type, data: state.code)
+        eventProcess(name: 'securityKeypad', value: SECURITY_KEYPAD_EXIT_DELAY, type: type, data: state.code)
         if (logEnable) {
             log.debug "exitDelay | type: ${type}"
         }
