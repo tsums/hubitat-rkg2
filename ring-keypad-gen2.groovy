@@ -4,8 +4,9 @@
     Copyright 2020 -> 2021 Hubitat Inc.  All Rights Reserved
     Special Thanks to Bryan Copeland (@bcopeland) for writing and releasing this code to the community!
 
-    1.4.0 - 10/28/25 - Fix armNight partial function handling, format code, improve comments and debug logging,
-                       improve functin naming and variable names. - @tsums
+    1.4.0 - 10/28/25 - Format code, improve comments and debug logging, improve function naming and
+                       variable names. Improve HSM integration and fix misc. bugs. Add chime capability. 
+                       Improve readability and fetching power status. - @tsums
     1.3.1 - 05/13/25 - Fix motion event parsing, fix debug logging in NotificationReport parse
     1.3.0 - 04/13/25 - Update to eliminate manual hex parsing (for ZWaveJS compatibility) @jtp10181
     1.2.5 - 08/02/22 - Rework Driver to allow options to use Subscription to armingIn device status for apps that
@@ -30,6 +31,27 @@ import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_COD
 import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_ALARM
 import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_ALARM_CO
 import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_ALARM_SMOKE
+import static hubitat.zwave.commands.notificationv8.NotificationGet.NOTIFICATION_TYPE_POWER_MANAGEMENT
+import static hubitat.zwave.commands.notificationv8.NotificationGet.NOTIFICATION_TYPE_BURGLAR 
+import static hubitat.zwave.commands.notificationv8.NotificationGet.NOTIFICATION_TYPE_SYSTEM 
+import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_ARM_HOME
+import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_ARM_AWAY
+import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_DISARM_ALL
+import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_ENTER
+import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_ALERT_MEDICAL
+import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_FIRE
+import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_POLICE
+import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_CACHED_KEYS
+
+@Field static Integer AC_MAINS_DISCONNECTED = 0x02
+@Field static Integer AC_MAINS_RECONNECTED = 0x03
+@Field static Integer BATTERY_CHARGING = 0x0C
+@Field static Integer BATTERY_FULL = 0x0D
+
+@Field static Integer MOTION_DETECTION = 0x08
+@Field static Integer STATE_IDLE = 0x00
+
+@Field static Integer SYSTEM_SOFTWARE_FAILURE = 0x04
 
 def version() {
     return '1.4.0'
@@ -92,10 +114,10 @@ metadata {
             ['Tone_8':'(Tone_8) DoorBell 2'],
             ['Tone_9':'(Tone_9) Invalid Code Sound'],
         ], defaultValue: 'Tone_1', description: 'Default tone for playback.'
-        input name: 'instantArming', type: 'bool', title: 'Enable set alarm without code', defaultValue: false, description: ''
-        input name: 'validateCheck', type: 'bool', title: 'Validate codes submitted with checkmark', defaultValue: false, description: ''
-        input name: 'proximitySensor', type: 'bool', title: 'Disable the Proximity Sensor', defaultValue: false, description: ''
-        input name: 'optEncrypt', type: 'bool', title: 'Enable lockCode encryption', defaultValue: false, description: ''
+        input name: 'instantArming', type: 'bool', title: 'Enable Codeless Arming', defaultValue: false, description: 'If enabled, system can be armed without a valid code.'
+        input name: 'validateCheck', type: 'bool', title: 'Validate codes submitted with checkmark', defaultValue: false, description: 'Allow valid code submission with the check button.'
+        input name: 'proximitySensor', type: 'bool', title: 'Disable the Proximity Sensor', defaultValue: false, description: 'Disable the proximity sensor. Note: no motion events will be received. Useful since we suspect on newer firmware the motion sensor causes the keypad to lock up.'
+        input name: 'optEncrypt', type: 'bool', title: 'Enable lock code encryption', defaultValue: false, description: 'Encrypt lock codes inside the driver.'
         input name: 'logEnable', type: 'bool', title: 'Enable debug logging', defaultValue: true
         input name: 'txtEnable', type: 'bool', title: 'Enable descriptionText logging', defaultValue: true
     }
@@ -130,6 +152,8 @@ metadata {
     8: 0x64, // Doorbell 2
     9: INDICATOR_TYPE_CODE_REJECTED  // Invalid Code
 ]
+// Depending on the notification code we're sending, we need to raise different
+// properties. Property 2 is "on", Property 9 is "volume", Property 1 is "level".
 @Field static Map INDICATOR_ID_TO_PROPERTY_ID = [
     (INDICATOR_TYPE_ALARM): 2, // Siren
     (INDICATOR_TYPE_ALARM_SMOKE): 2, // Smoke Alarm
@@ -166,6 +190,7 @@ void updated() {
 
 void installed() {
     initializeVars()
+    sendToDevice(setDefaultAssociation())
 }
 
 void uninstalled() {}
@@ -211,9 +236,14 @@ void pollDeviceData() {
     List<String> cmds = []
     cmds.add(zwave.versionV3.versionGet().format())
     cmds.add(zwave.batteryV1.batteryGet().format())
+    // Ask for the serial number.
     cmds.add(zwave.manufacturerSpecificV2.deviceSpecificGet(deviceIdType: 1).format())
-    cmds.add(zwave.notificationV8.notificationGet(notificationType: 8, event: 0).format())
-    cmds.add(zwave.notificationV8.notificationGet(notificationType: 7, event: 0).format())
+    // Poll for power status / events.
+    cmds.add(zwave.notificationV8.notificationGet(notificationType: NOTIFICATION_TYPE_POWER_MANAGEMENT, event: AC_MAINS_DISCONNECTED).format())
+    cmds.add(zwave.notificationV8.notificationGet(notificationType: NOTIFICATION_TYPE_POWER_MANAGEMENT, event: AC_MAINS_RECONNECTED).format())
+    cmds.add(zwave.notificationV8.notificationGet(notificationType: NOTIFICATION_TYPE_POWER_MANAGEMENT, event: BATTERY_CHARGING).format())
+    cmds.add(zwave.notificationV8.notificationGet(notificationType: NOTIFICATION_TYPE_POWER_MANAGEMENT, event: BATTERY_FULL).format())
+    cmds.add(zwave.notificationV8.notificationGet(notificationType: NOTIFICATION_TYPE_BURGLAR, event: 0).format())
     // TODO: Trying to figure out if it will tell us the state of the indicators, but it seems like ... no?
     // All of the reports that come back are missing property 2...
     cmds.add(zwave.indicatorV3.indicatorGet(indicatorId: INDICATOR_TYPE_ALARM).format())
@@ -221,14 +251,14 @@ void pollDeviceData() {
     cmds.add(zwave.indicatorV3.indicatorGet(indicatorId: INDICATOR_TYPE_ARMED_AWAY).format())
     cmds.add(zwave.indicatorV3.indicatorGet(indicatorId: INDICATOR_TYPE_ARMED_STAY).format())
     cmds.add(zwave.indicatorV3.indicatorSupportedGet(indicatorId: INDICATOR_TYPE_DISARMED).format())
-    cmds.addAll(setDefaultAssociation())
     sendToDevice(cmds)
 }
 
 // Updates the keypad indicator status. This will result in the keypad announcing the status e.g.
 // "Armed and Home", "Disarmed".
 // It would be better to only update the status if we knew it was different, but it seems like
-// The keypad doesn't let us poll for indicator status.
+// The keypad doesn't let us poll for indicator status, it seems - All come back missing property 0x02
+// from the indicator report.
 private void keypadUpdateStatus(Integer status, String type='digital', String code) {
     if (logEnable) {
         log.debug "In keypadUpdateStatus (${version()}) - status: ${status} type: ${type} code: ${code}"
@@ -310,9 +340,7 @@ void setPartialFunction(mode = null) {
         log.debug "In setPartialFucntion (${version()}) - mode: ${mode}"
     }
     if (!(mode in ['armHome', 'armNight'])) {
-        if (txtEnable) {
-            log.warn "Custom command used by HSM: ${mode}"
-        }
+        log.warn "Custom command used by HSM: ${mode}"
     } else if (mode in ['armHome', 'armNight']) {
         state.keypadConfig.partialFunction = mode
     }
@@ -348,11 +376,7 @@ void armNightEnd() {
     }
     def sk = device.currentValue('securityKeypad')
     if (sk != 'armed night') {
-        Date now = new Date()
-        sendLocationEvent(name: 'hsmSetArm', value: 'armNight')
-        sendEvent(name:'alarmStatusChangeTime', value: "${now}", isStateChange:true)
-        long ems = now.getTime()
-        sendEvent(name:'alarmStatusChangeEpochms', value: "${ems}", isStateChange:true)
+        alarmStatusChangeNow()
     }
 }
 
@@ -444,11 +468,7 @@ void armAwayEnd() {
         if (logEnable) {
             log.debug "In armAwayEnd (${version()}) sk: ${sk} Executing after delayed arming"
         }
-        Date now = new Date()
-        keypadUpdateStatus(INDICATOR_TYPE_ARMED_AWAY, state.type, state.code)
-        sendEvent(name:'alarmStatusChangeTime', value: "${now}", isStateChange:true)
-        long ems = now.getTime()
-        sendEvent(name:'alarmStatusChangeEpochms', value: "${ems}", isStateChange:true)
+        alarmStatusChangeNow()
         changeStatus('set')
         state.armingIn = 0
     } else if (sk != 'armed away') {
@@ -461,9 +481,7 @@ void armAwayEnd() {
             // Event HSM Subscribes to
             sendEvent(name:'armingIn', value: state.keypadConfig.armAwayDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_AWAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_AWAY].hsmCmd], isStateChange:true)
         }
-        sendEvent(name:'alarmStatusChangeTime', value: "${now}", isStateChange:true)
-        long ems = now.getTime()
-        sendEvent(name:'alarmStatusChangeEpochms', value: "${ems}", isStateChange:true)
+
         changeStatus('set')
         state.armingIn = 0
     }
@@ -538,11 +556,8 @@ void armHomeEnd() {
         if (logEnable) {
             log.debug "In armHomeEnd (${version()}) sk: ${sk} Executing after delayed arming"
         }
-        Date now = new Date()
         keypadUpdateStatus(INDICATOR_TYPE_ARMED_STAY, state.type, state.code)
-        sendEvent(name:'alarmStatusChangeTime', value: "${now}", isStateChange:true)
-        long ems = now.getTime()
-        sendEvent(name:'alarmStatusChangeEpochms', value: "${ems}", isStateChange:true)
+        alarmStatusChangeNow()
         changeStatus('set')
         state.armingIn = 0
     }
@@ -550,15 +565,12 @@ void armHomeEnd() {
         if (logEnable) {
             log.debug "In armHomeEnd (${version()}) sk: ${sk} Executing immediate arming"
         }
-        Date now = new Date()
         keypadUpdateStatus(INDICATOR_TYPE_ARMED_STAY, state.type, state.code)
         if (state.type == 'digital') {
             // Event for HSM.
             sendEvent(name:'armingIn', value: state.keypadConfig.armHomeDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_STAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_STAY].hsmCmd], isStateChange:true)
         }
-        sendEvent(name:'alarmStatusChangeTime', value: "${now}", isStateChange:true)
-        long ems = now.getTime()
-        sendEvent(name:'alarmStatusChangeEpochms', value: "${ems}", isStateChange:true)
+        alarmStatusChangeNow()
         changeStatus('set')
         state.armingIn = 0
     }
@@ -601,9 +613,7 @@ void disarmEnd() {
         Date now = new Date()
         keypadUpdateStatus(INDICATOR_TYPE_DISARMED, state.type, state.code)  // Sends status to Keypad
         sendLocationEvent(name: 'hsmSetArm', value: 'disarm')
-        sendEvent(name:'alarmStatusChangeTime', value: "${now}", isStateChange:true)
-        long ems = now.getTime()
-        sendEvent(name:'alarmStatusChangeEpochms', value: "${ems}", isStateChange:true)
+        alarmStatusChangeNow()
         changeStatus('off')
         state.armingIn = 0
         unschedule(armHomeEnd)
@@ -614,7 +624,7 @@ void disarmEnd() {
 
 void exitDelay(delay) {
     if (logEnable) {
-        log.debug "In exitDelay (${version()}) - delay: ${delay}"
+        log.debug "In exitDelay - delay: ${delay}"
     }
     if (delay) {
         sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:INDICATOR_TYPE_EXIT_DELAY, propertyId:7, value:delay.toInteger()]]).format())
@@ -623,14 +633,14 @@ void exitDelay(delay) {
         type = state.code != '' ? 'physical' : 'digital'
         eventProcess(name: 'securityKeypad', value: 'exit delay', type: type, data: state.code)
         if (logEnable) {
-            log.debug "In exitDelay (${version()}) - type: ${type}"
+            log.debug "In exitDelay - type: ${type}"
         }
     }
 }
 
 private void changeStatus(status) {
     if (logEnable) {
-        log.debug "In changeStatus (${version()}) - new status: ${status}"
+        log.debug "In changeStatus - new status: ${status}"
     }
     sendEvent(name: 'alarm', value: status, isStateChange: true)
 }
@@ -645,7 +655,7 @@ void entry() {
 
 void entry(entranceDelay) {
     if (logEnable) {
-        log.debug "In entry (${version()}) - delay: ${entranceDelay}"
+        log.debug "In entry - delay: ${entranceDelay}"
     }
     if (entranceDelay) {
         sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:INDICATOR_TYPE_ENTRY_DELAY, propertyId:7, value:entranceDelay.toInteger()]]).format())
@@ -679,34 +689,20 @@ void stop() {
 // -- Alarm Capability Commands --
 
 void off() {
-    if (logEnable) {
-        log.debug "In off (${version()})"
-    }
-    eventProcess(name:'alarm', value:'off')
     changeStatus('off')
     sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:state.keypadStatus, propertyId:2, value:0xFF]]).format())
 }
 
 void both() {
-    if (logEnable) {
-        log.debug "In both (${version()})"
-    }
     siren()
 }
 
 void siren() {
-    if (logEnable) {
-        log.debug "In Siren (${version()})"
-    }
-    eventProcess(name:'alarm', value:'siren')
     changeStatus('siren')
     sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:INDICATOR_TYPE_ALARM, propertyId:2, value:0xFF]]).format())
 }
 
 void strobe() {
-    if (logEnable) {
-        log.debug "In strobe (${version()})"
-    }
     // The keypad doesn't support strobing without siren. So we'll just use siren() here.
     siren()
 }
@@ -736,30 +732,7 @@ void push(btn) {
 
 void hold(btn) {
     state.type = 'digital'
-    sendEvent(name: 'held', value: btn, isStateChange:true)
-    switch (btn) {
-        case 11:
-            Date now = new Date()
-            long ems = now.getTime()
-            sendEvent(name:'lastCodeName', value: 'police', isStateChange:true)
-            sendEvent(name:'lastCodeTime', value: "${now}", isStateChange:true)
-            sendEvent(name:'lastCodeEpochms', value: "${ems}", isStateChange:true)
-            break
-        case 12:
-            Date now = new Date()
-            long ems = now.getTime()
-            sendEvent(name:'lastCodeName', value: 'fire', isStateChange:true)
-            sendEvent(name:'lastCodeTime', value: "${now}", isStateChange:true)
-            sendEvent(name:'lastCodeEpochms', value: "${ems}", isStateChange:true)
-            break
-        case 13:
-            Date now = new Date()
-            long ems = now.getTime()
-            sendEvent(name:'lastCodeName', value: 'medical', isStateChange:true)
-            sendEvent(name:'lastCodeTime', value: "${now}", isStateChange:true)
-            sendEvent(name:'lastCodeEpochms', value: "${ems}", isStateChange:true)
-            break
-    }
+    sendEvent(name: 'held', value: btn, isStateChange: true)
 }
 
 void getCodes() {
@@ -770,57 +743,52 @@ void getCodes() {
 }
 
 private updateEncryption() {
-    String lockCodes = device.currentValue('lockCodes') //encrypted or decrypted
+    String lockCodes = device.currentValue('lockCodes') // encrypted or decrypted
     if (lockCodes) {
-        if (optEncrypt && lockCodes[0] == '{') {    //resend encrypted
-            sendEvent(name:'lockCodes', value: encrypt(lockCodes), isStateChange:true)
-        } else if (!optEncrypt && lockCodes[0] != '{') {    //resend decrypted
-            sendEvent(name:'lockCodes', value: decrypt(lockCodes), isStateChange:true)
+        if (optEncrypt && lockCodes[0] == '{') {    // resend encrypted
+            sendEvent(name:'lockCodes', value: encrypt(lockCodes), isStateChange: true)
+        } else if (!optEncrypt && lockCodes[0] != '{') {    // resend decrypted
+            sendEvent(name:'lockCodes', value: decrypt(lockCodes), isStateChange: true)
         } else {
-            sendEvent(name:'lockCodes', value: lockCodes, isStateChange:true)
+            sendEvent(name:'lockCodes', value: lockCodes, isStateChange: true)
         }
     }
 }
 
 private Boolean validatePin(String pincode) {
-    boolean retVal = false
+    boolean validCode = false
     Map lockcodes = [:]
-    if (optEncrypt) {
-        try {
-            lockcodes = parseJson(decrypt(device.currentValue('lockCodes')))
-        } catch (e) {
-            log.warn 'Ring Alarm Keypad G2 Community - No lock codes found.'
-        }
-    } else {
-        try {
-            lockcodes = parseJson(device.currentValue('lockCodes'))
-        } catch (e) {
-            log.warn 'Ring Alarm Keypad G2 Community - No lock codes found.'
-        }
+
+    String configCodes = optEncrypt ? decrypt(device.currentValue('lockCodes')) : device.currentValue('lockCodes')
+    try {
+        lockcodes = parseJson(configCodes)
+    } catch (e) {
+        log.warn 'No lock codes found.'
     }
+
     if (lockcodes) {
         lockcodes.each {
             if (it.value['code'] == pincode) {
                 Date now = new Date()
                 long ems = now.getTime()
+                
                 sendEvent(name:'validCode', value: 'true', isStateChange: true)
                 sendEvent(name:'lastCodeName', value: "${it.value['name']}", isStateChange:true)
                 sendEvent(name:'lastCodeTime', value: "${now}", isStateChange:true)
                 sendEvent(name:'lastCodeEpochms', value: "${ems}", isStateChange:true)
-                retVal = true
+                
+                validCode = true
                 String code = JsonOutput.toJson(["${it.key}":['name': "${it.value.name}", 'code': "${it.value.code}", 'isInitiator': true]])
-                if (optEncrypt) {
-                    state.code = encrypt(code)
-                } else {
-                    state.code = code
-                }
+                state.code = optEncrypt ? encrypt(code) : code
             }
         }
     }
-    if (!retVal) {
+
+    if (!validCode) {
         sendEvent(name:'validCode', value: 'false', isStateChange: true)
     }
-    return retVal
+
+    return validCode
 }
 
 void setCode(codeposition, pincode, name) {
@@ -874,12 +842,6 @@ void deleteCode(codeposition) {
     sendEvent(name: 'codeChanged', value: 'deleted')
 }
 
-void zwaveEvent(hubitat.zwave.commands.indicatorv3.IndicatorReport cmd) {
-    if (logEnable) {
-        log.debug "Indicator Report: ${cmd}"
-    }
-}
-
 List<String> runConfigs() {
     List<String> cmds = []
     configParams.each { param, data ->
@@ -919,6 +881,9 @@ void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) 
         cmd.configurationValue.reverse().eachWithIndex { v, index ->
             scaledValue = scaledValue | v << (8 * index)
         }
+        if (logEnable) {
+            log.debug "Configuration Report: ${configParam.input.name} is [${scaledValue}]"
+        }
         device.updateSetting(configParam.input.name, [value: "${scaledValue}", type: configParam.input.type])
     }
 }
@@ -939,8 +904,6 @@ void zwaveEvent(hubitat.zwave.commands.batteryv1.BatteryReport cmd) {
     sendEvent(evt)
 }
 
-// MSP V2
-
 void zwaveEvent(hubitat.zwave.commands.manufacturerspecificv2.DeviceSpecificReport cmd) {
     if (logEnable) {
         log.debug "Device Specific Report - DeviceIdType: ${cmd.deviceIdType}, DeviceIdFormat: ${cmd.deviceIdDataFormat}, Data: ${cmd.deviceIdData}"
@@ -955,8 +918,6 @@ void zwaveEvent(hubitat.zwave.commands.manufacturerspecificv2.DeviceSpecificRepo
         device.updateDataValue('serialNumber', serialNumber)
     }
 }
-
-// Version V2
 
 void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
     Double firmware0Version = cmd.firmware0Version + (cmd.firmware0SubVersion / 100)
@@ -980,45 +941,38 @@ void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd) {
         log.info "Notification Report: ${cmd}"
     }
     Map evt = [:]
-    if (cmd.notificationType == 8) {
-        // power management
+    if (cmd.notificationType == NOTIFICATION_TYPE_POWER_MANAGEMENT) {
         switch (cmd.event) {
-            case 1:
-                // Power has been applied
-                if (txtEnable) {
-                    log.info "${device.displayName} Power has been applied"
-                }
-                break
-            case 2:
-                // AC mains disconnected
+            case AC_MAINS_DISCONNECTED:
                 evt.name = 'powerSource'
                 evt.value = 'battery'
-                evt.descriptionText = "${device.displayName} AC mains disconnected"
+                evt.descriptionText = "${device.displayName} AC mains is disconnected"
                 eventProcess(evt)
                 break
-            case 3:
-                // AC mains re-connected
+            case AC_MAINS_RECONNECTED:
                 evt.name = 'powerSource'
                 evt.value = 'mains'
-                evt.descriptionText = "${device.displayName} AC mains re-connected"
+                evt.descriptionText = "${device.displayName} AC mains is re-connected"
                 eventProcess(evt)
                 break
-            case 12:
-                // battery is charging
+            case BATTERY_CHARGING:
                 if (txtEnable) {
                     log.info "${device.displayName} Battery is charging"
                 }
                 break
+            case BATTERY_FULL:
+                if (txtEnable) {
+                    log.info "${device.displayName} Battery is fully charged"
+                }
+                break
         }
     }
-    else if (cmd.notificationType == 7) {
-        // Security (Motion Sensor)
-        if (cmd.event == 8) {
-            // motion active
+    else if (cmd.notificationType == NOTIFICATION_TYPE_BURGLAR) {
+        if (cmd.event == MOTION_DETECTION) {
             evt.name = 'motion'
             evt.value = 'active'
-        } else if (cmd.event == 0 && cmd.eventParameter[0] == 8) {
-            // idle event, motion clear
+        } else if (cmd.event == STATE_IDLE && cmd.eventParameter[0] == MOTION_DETECTION) {
+            // Motion has cleared.
             evt.name = 'motion'
             evt.value = 'inactive'
         } else if (cmd.event == 0 && cmd.notificationStatus == 255) {
@@ -1029,20 +983,24 @@ void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd) {
         } else {
             log.warn "Unhandled Notification (Security): ${cmd}"
         }
-        // send event if found
         if (evt.name) {
             evt.descriptionText = "${device.displayName} ${evt.name} is ${evt.value}"
             eventProcess(evt)
         }
-    } else if (cmd.notificationType == 9 && cmd.event == 4) {
-        // According to the manual, this is the "System" notification type. 4 is a "software fault".
-        // There are different kinds of faults documented.
+    } else if (cmd.notificationType == NOTIFICATION_TYPE_SYSTEM && cmd.event == SYSTEM_SOFTWARE_FAILURE) {
+        // There are different kinds of faults documented in the manual.
         log.warn "${device.displayName} reports a software fault: ${cmd.eventParameter[0]}: 0x${hubitat.helper.HexUtils.integerToHexString(cmd.eventParameter[0], 1)}."
     }
     else {
         if (logEnable) {
             log.debug "Unhandled NotificationReport: ${cmd}"
         }
+    }
+}
+
+void zwaveEvent(hubitat.zwave.commands.indicatorv3.IndicatorReport cmd) {
+    if (logEnable) {
+        log.debug "Indicator Report: ${cmd}"
     }
 }
 
@@ -1061,23 +1019,24 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
     ecn.sequenceNumber = cmd.sequenceNumber
     ecn.dataType = cmd.dataType
     ecn.eventType = cmd.eventType
+
     def currentStatus = device.currentValue('securityKeypad')
     def alarmStatus = device.currentValue('alarm')
+    
     String code = (cmd.eventData.collect { (char) it }.join() as String)
 
     if (logEnable) {
         log.debug "Entry control: ${ecn} keycache: ${code}"
     }
     switch (ecn.eventType) {
-        // Away Mode Button
-        case 5:
+        case EVENT_TYPE_ARM_AWAY:
             if (logEnable) {
-                log.debug 'In case 5 - Away Mode Button'
+                log.debug 'Away Mode Button'
             }
             if (validatePin(code) || instantArming) {
                 if (currentStatus == 'disarmed') {
                     if (logEnable) {
-                        log.debug "In case 5 - Passed - currentStatus: ${currentStatus}"
+                        log.debug "Passed - currentStatus: ${currentStatus}"
                     }
                     state.type = 'physical'
                     if (!state.keypadConfig.armAwayDelay) {
@@ -1088,20 +1047,19 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
                     sendEvent(name:'armingIn', descriptionText: "Arming AWAY mode in ${state.keypadConfig.armAwayDelay} delay", value: state.keypadConfig.armAwayDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_AWAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_AWAY].hsmCmd], isStateChange:true)
                 } else {
                     if (logEnable) {
-                        log.debug "In case 5 - Failed - Please Disarm Alarm before changing alarm type - currentStatus: ${currentStatus}"
+                        log.debug "Failed - Please Disarm Alarm before changing alarm type - currentStatus: ${currentStatus}"
                     }
                 }
             } else {
                 if (logEnable) {
-                    log.debug "In case 5 - Failed - Invalid PIN - currentStatus: ${currentStatus}"
+                    log.debug "Failed - Invalid PIN - currentStatus: ${currentStatus}"
                 }
                 notifyInvalidCode()
             }
             break
-        // Home Mode Button
-        case 6:
+        case EVENT_TYPE_ARM_HOME:
             if (logEnable) {
-                log.debug 'In case 6 - Home Mode Button'
+                log.debug 'Home Mode Button'
             }
             if (validatePin(code) || instantArming) {
                 if (currentStatus == 'disarmed') {
@@ -1110,7 +1068,7 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
                     state.keypadConfig.partialFunction = state.keypadConfig.partialFunctiob ?: 'armHome'
                     if (state.keypadConfig.partialFunction == 'armHome') {
                         if (logEnable) {
-                            log.debug 'In case 6 - Partial Passed - Arming Home'
+                            log.debug 'Passed - Arming Home'
                         }
                         if (!state.keypadConfig.armHomeDelay) {
                             state.keypadConfig.armHomeDelay = 0
@@ -1123,13 +1081,13 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
                 } else {
                     if (alarmStatus == 'active') {
                         if (logEnable) {
-                            log.debug "In case 6 - Silenced - Alarm will sound again in 10 seconds - currentStatus: ${currentStatus}"
+                            log.debug "Silenced - Alarm will sound again in 10 seconds - currentStatus: ${currentStatus}"
                         }
                         changeStatus('silent')
                         runIn(10, changeStatus, [data:'active'])
                     } else {
                         if (logEnable) {
-                            log.debug "In case 6 - Failed - Please Disarm Alarm before changing alarm type - currentStatus: ${currentStatus}"
+                            log.debug "Failed - Please Disarm Alarm before changing alarm type - currentStatus: ${currentStatus}"
                         }
                     }
                 }
@@ -1140,23 +1098,19 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
                 notifyInvalidCode()
             }
             break
-        // Disarm Mode Button
-        case 3:
+        case EVENT_TYPE_DISARM_ALL:
             if (logEnable) {
-                log.debug 'In case 3 - Disarm Mode Button'
+                log.debug 'Disarm Mode Button'
             }
             if (validatePin(code)) {
                 if (logEnable) {
-                    log.debug 'In case 3 - Code Passed'
+                    log.debug 'Code Passed'
                 }
                 state.type = 'physical'
                 // Event HSM Subscribes to
                 sendEvent(name:'armingIn', value: 0, descriptionText: 'Disarming after valid code entry', data:[armMode: armingStates[INDICATOR_TYPE_DISARMED].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_DISARMED].hsmCmd], isStateChange:true)
-                keypadUpdateStatus(INDICATOR_TYPE_DISARMED, state.type, state.code) // Sends status to Keypad to move it to disarmed
-                Date now = new Date()
-                sendEvent(name:'alarmStatusChangeTime', value: "${now}", isStateChange:true)
-                long ems = now.getTime()
-                sendEvent(name:'alarmStatusChangeEpochms', value: "${ems}", isStateChange:true)
+                keypadUpdateStatus(INDICATOR_TYPE_DISARMED, state.type, state.code)
+                alarmStatusChangeNow()
                 changeStatus('off')
                 state.armingIn = 0
                 unschedule(armHomeEnd)
@@ -1164,13 +1118,13 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
                 unschedule(changeStatus)
             } else {
                 if (logEnable) {
-                    log.debug "In case 3 - Disarm Failed - Invalid PIN - currentStatus: ${currentStatus}"
+                    log.debug "Disarm Failed - Invalid PIN - currentStatus: ${currentStatus}"
                 }
                 notifyInvalidCode()
             }
             break
         // Code sent after hitting the Check Mark
-        case 2:
+        case EVENT_TYPE_ENTER:
             state.type = 'physical'
             Date now = new Date()
             long ems = now.getTime()
@@ -1180,22 +1134,22 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
             if (validateCheck) {
                 if (validatePin(code)) {
                     if (logEnable) {
-                        log.debug 'In case 2 (check mark) - Code Passed'
+                        log.debug 'Generic Code Enter - Code Passed'
                     }
                 } else {
                     if (logEnable) {
-                        log.debug "In case 2 (check mark) - Code Failed - Invalid PIN - currentStatus: ${currentStatus}"
+                        log.debug "Generic Code Enter - Code Failed - Invalid PIN - currentStatus: ${currentStatus}"
                     }
                     notifyInvalidCode()
                 }
             } else {
+                // Just emit the code as the last entered, but no validity specified.
                 sendEvent(name:'lastCodeName', value: "${code}", isStateChange:true)
                 sendEvent(name:'lastCodeTime', value: "${now}", isStateChange:true)
                 sendEvent(name:'lastCodeEpochms', value: "${ems}", isStateChange:true)
             }
             break
-        // Police Button
-        case 17:
+        case EVENT_TYPE_POLICE:
             state.type = 'physical'
             Date now = new Date()
             long ems = now.getTime()
@@ -1204,8 +1158,7 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
             sendEvent(name:'lastCodeEpochms', value: "${ems}", isStateChange:true)
             sendEvent(name: 'held', value: 11, isStateChange: true)
             break
-        // Fire Button
-        case 16:
+        case EVENT_TYPE_FIRE:
             state.type = 'physical'
             Date now = new Date()
             long ems = now.getTime()
@@ -1214,8 +1167,7 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
             sendEvent(name:'lastCodeEpochms', value: "${ems}", isStateChange:true)
             sendEvent(name: 'held', value: 12, isStateChange: true)
             break
-        // Medical Button
-        case 19:
+        case EVENT_TYPE_ALERT_MEDICAL:
             state.type = 'physical'
             Date now = new Date()
             long ems = now.getTime()
@@ -1225,7 +1177,7 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
             sendEvent(name: 'held', value: 13, isStateChange: true)
             break
         // Button pressed or held, idle timeout reached without explicit submission
-        case 1:
+        case EVENT_TYPE_CACHED_KEYS:
             state.type = 'physical'
             handleButtons(code)
             break
@@ -1270,7 +1222,6 @@ void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
         zwaveEvent(encapsulatedCommand)
     }
 
-    // device quirk requires this to be insecure reply
     sendToDevice(zwave.supervisionV1.supervisionReport(sessionID: cmd.sessionID, reserved: 0, moreStatusUpdates: false, status: 0xFF, duration: 0).format())
 }
 
@@ -1283,8 +1234,6 @@ void parse(String event) {
         zwaveEvent(cmd)
     }
 }
-
-// 
 
 void proximitySensorHandler() {
     if (proximitySensor) {
@@ -1384,7 +1333,7 @@ def playTone(tone=null) {
     if (!tone) {
         tone = theTone
         if (logEnable) {
-            log.debug "In playTone - Tone is NULL, so setting tone to theTone: ${tone}"
+            log.debug "In playTone - Tone is NULL, so setting tone to default: ${tone}"
         }
     }
     if (tone == 'Tone_1') { // Siren
@@ -1422,6 +1371,14 @@ private void sendSoundCommand(soundIndicatorId, volume) {
 
 private void notifyInvalidCode() {
     sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:INDICATOR_TYPE_CODE_REJECTED, propertyId:2, value:0xFF]]).format())
+}
+
+private void alarmStatusChangeNow() {
+    Date now = new Date()
+    sendLocationEvent(name: 'hsmSetArm', value: 'armNight')
+    sendEvent(name:'alarmStatusChangeTime', value: "${now}", isStateChange:true)
+    long ems = now.getTime()
+    sendEvent(name:'alarmStatusChangeEpochms', value: "${ems}", isStateChange:true)
 }
 
 // Helpers to send commands to the devicde.
