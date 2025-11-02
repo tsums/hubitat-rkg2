@@ -53,6 +53,11 @@ import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVE
 
 @Field static Integer SYSTEM_SOFTWARE_FAILURE = 0x04
 
+@Field static String SECURITY_KEYPAD_ARMED_AWAY = "armed away"
+@Field static String SECURITY_KEYPAD_ARMED_HOME = "armed home"
+@Field static String SECURITY_KEYPAD_ARMED_NIGHT = "armed night"
+@Field static String SECURITY_KEYPAD_DISARMED = "disarmed"
+
 def version() {
     return '1.4.0'
 }
@@ -134,9 +139,9 @@ metadata {
     22: [input: [name: 'configParam22', type: 'number', title: 'System Security Mode Display', description:'601 = Always On, 1 - 600 = periodic interval, 0 = Always Off, except activity', defaultValue: 0, range:'0..601'], parameterSize:2],
 ]
 @Field static Map armingStates = [
-    (INDICATOR_TYPE_DISARMED):[securityKeypadState: 'disarmed', hsmCmd: 'disarm'],
-    (INDICATOR_TYPE_ARMED_STAY): [securityKeypadState: 'armed home', hsmCmd: 'armHome'],
-    (INDICATOR_TYPE_ARMED_AWAY): [securityKeypadState: 'armed away', hsmCmd: 'armAway'],
+    (INDICATOR_TYPE_DISARMED): [securityKeypadState: (SECURITY_KEYPAD_DISARMED), hsmCmd: 'disarm'],
+    (INDICATOR_TYPE_ARMED_STAY): [securityKeypadState: (SECURITY_KEYPAD_ARMED_HOME), hsmCmd: 'armHome'],
+    (INDICATOR_TYPE_ARMED_AWAY): [securityKeypadState: (SECURITY_KEYPAD_ARMED_AWAY), hsmCmd: 'armAway'],
 ]
 @Field static Map CMD_CLASS_VERS = [0x70:1, 0x20:1, 0x86:3, 0x6F:1]
 // These are factory sounds that can't be changed, so just emit them as the supported sound effects.
@@ -206,8 +211,8 @@ void initializeVars() {
     sendEvent(name:'volAnnouncement', value: 8)
     sendEvent(name:'volKeytone', value: 8)
     sendEvent(name:'volSiren', value: 8)
-    sendEvent(name:'securityKeypad', value:'disarmed')
-    sendEvent(name:'soundEffects', value:SOUND_EFFECTS)
+    sendEvent(name:'securityKeypad', value: 'disarmed')
+    sendEvent(name:'soundEffects', value: SOUND_EFFECTS)
     state.keypadConfig = [entryDelay:5, exitDelay: 5, armNightDelay:5, armAwayDelay:5, armHomeDelay: 5, codeLength: 4, partialFunction: 'armHome']
     state.keypadStatus = INDICATOR_TYPE_DISARMED
     state.initialized = true
@@ -261,7 +266,7 @@ void pollDeviceData() {
 // from the indicator report.
 private void keypadUpdateStatus(Integer status, String type='digital', String code) {
     if (logEnable) {
-        log.debug "In keypadUpdateStatus (${version()}) - status: ${status} type: ${type} code: ${code}"
+        log.debug "keypadUpdateStatus - status: ${status} type: ${type} code: ${code}"
     }
     sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount: 1, value: 0, indicatorValues: [[indicatorId:status, propertyId:2, value:0xFF]]).format())
     state.keypadStatus = status
@@ -380,74 +385,58 @@ void armNightEnd() {
     }
 }
 
+// armAway is intended to be called by HSM in response to an armingIn event change.
+// It is also possible to directly invoke a digital armAway command on the keypad.
+// This method needs to determine whether to invoke HSM, or if it was invoked _by_ HSM,
+// in order to avoid duplicate events.
 void armAway(delay=state.keypadConfig.armAwayDelay) {
-    if (logEnable) {
-        log.debug "In armAway (${version()}) - delay: ${delay}"
-    }
     def sk = device.currentValue('securityKeypad')
     def al = device.currentValue('alarm')
     if (logEnable) {
-        log.debug "In armAway (${version()}) - sk: ${sk}"
+        log.debug "armAway | Delay: ${delay}"
+        log.debug "armAway | Current SK Status: ${sk}"
     }
-    if (sk != 'armed away') {
-        if (delay > 0 ) {
-            state.armingIn = state.keypadConfig.armAwayDelay
-            // Added conditions for digital control distinction
+    if (sk != SECURITY_KEYPAD_ARMED_AWAY) {
+        if (delay > 0) {
+            state.armingIn = delay
+            // Digital Submit - Keypad was told to arm via hub command.
             if (state.type == 'digital' && al != 'armingAway') {
                 if (logEnable) {
-                    log.debug "In armAway (${version()}) alarm: ${al} - Validation for first digital submit"
+                    log.debug "armAway | alarm: ${al} - Validation for first digital submit"
                 }
-                // Event HSM Subscribes to
-                sendEvent(name:'armingIn', value: state.keypadConfig.armAwayDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_AWAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_AWAY].hsmCmd], isStateChange:true)
-                // Set variable to for second digital submit
+                // Change status to avoid looping.
                 changeStatus('armingAway')
-                if (logEnable) log.debug "In armAway (${version()}) - armingIn: ${state.armingIn}"
+                // Trigger HSM to begin arming.
+                sendEvent(name:'armingIn', value: state.keypadConfig.armAwayDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_AWAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_AWAY].hsmCmd], isStateChange:true)
+                if (logEnable) {
+                    log.debug "armAway | armingIn: ${state.armingIn}"
+                }
                 exitDelay(delay)
                 runIn(delay, armAwayEnd)
             }
-            // Added conditions for digital control distinction
+            // Physical Submit - Keypad was told to arm via button press.
             if (state.type == 'physical' && al != 'armingAway') {
                 if (logEnable) {
-                    log.debug "In armAway (${version()}) alarm: ${al} - Validation for first physical submit"
+                    log.debug "armAway | alarm: ${al} - Validation for first physical submit"
                 }
-                // Set variable to for second digital submit
+                // Change status to avoid looping.
                 changeStatus('armingAway')
                 if (logEnable) {
-                    log.debug "In armAway (${version()}) - armingIn: ${state.armingIn}"
+                    log.debug "armAway | armingIn: ${state.armingIn}"
                 }
                 exitDelay(delay)
                 runIn(delay, armAwayEnd)
             } else if (al == 'armingAway') {
                 if (logEnable) {
-                    log.debug "In armAway (${version()}) - Second Submission from HSM, not sending HSM update"
+                    log.debug "armAway | Already armingAway, not dispatching any events."
                 }
-                // Populate variable to be able to distinquish slarm state thta isn't final
-                if (logEnable) {
-                    log.debug "In armAway (${version()}) - No mathing condition. Nothing to execute"
-                }
-            } else {
-                armAwayEnd()
-            }
+            } 
         } else {
-            if (logEnable) {
-                log.debug "In armAway - securityKeypad already set to 'armed away', so skipping."
-            }
+            armAwayEnd()
         }
     } else {
         if (logEnable) {
-            log.debug "In armAway (${version()}) - delay: ${delay}"
-        }
-        if (sk != 'armed away') {
-            if (delay > 0) {
-                exitDelay(delay)
-                runIn(delay, armAwayEnd)
-            } else {
-                armAwayEnd()
-            }
-        } else {
-            if (logEnable) {
-                log.debug "In armAway - securityKeypad already set to 'armed away', so skipping."
-            }
+            log.debug "armAway | securityKeypad already set to ${SECURITY_KEYPAD_ARMED_AWAY}, skipping."
         }
     }
 }
@@ -461,82 +450,82 @@ void armAwayEnd() {
     }
     def sk = device.currentValue('securityKeypad')
     if (logEnable) {
-        log.debug "In armAwayEnd (${version()}) - sk: ${sk} code: ${state.code} type: ${state.type} delay: ${delay}"
+        log.debug "armAwayEnd | sk: ${sk} code: ${state.code} type: ${state.type} delay: ${delay}"
     }
     // added conditional handling for Exit Delay status. for sepreate handeling of delayed exit.
     if (sk == 'exit delay') {
         if (logEnable) {
-            log.debug "In armAwayEnd (${version()}) sk: ${sk} Executing after delayed arming"
+            log.debug "armAwayEnd | sk: ${sk} Executing after delayed arming"
         }
+        keypadUpdateStatus(INDICATOR_TYPE_ARMED_AWAY, state.type, state.code)
         alarmStatusChangeNow()
         changeStatus('set')
         state.armingIn = 0
-    } else if (sk != 'armed away') {
+    } else if (sk != SECURITY_KEYPAD_ARMED_AWAY) {
         if (logEnable) {
-            log.debug "In armAwayEnd (${version()}) sk: ${sk} Executing immediate arming"
+            log.debug "armAwayEnd | sk: ${sk} Executing immediate arming"
         }
         Date now = new Date()
         keypadUpdateStatus(INDICATOR_TYPE_ARMED_AWAY, state.type, state.code)
         if (state.type == 'digital') {
-            // Event HSM Subscribes to
+            // Send the HSM event indicating immediate arming.
+            // TODO: Do we need this? It seems redundant, maybe it wouldn't have sent in armAway if digital and no delay?
             sendEvent(name:'armingIn', value: state.keypadConfig.armAwayDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_AWAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_AWAY].hsmCmd], isStateChange:true)
         }
-
         changeStatus('set')
         state.armingIn = 0
     }
 }
 
 void armHome(delay = state.keypadConfig.armHomeDelay) {
-    if (logEnable) {
-        log.debug "In armHome (${version()}) - delay: ${delay}"
-    }
     def sk = device.currentValue('securityKeypad')
     def al = device.currentValue('alarm')
-    if (sk != 'armed home') {
+    if (logEnable) {
+        log.debug "armHome | delay: ${delay}"
+        log.debug "armAway | Current SK Status: ${sk}"
+    }
+    if (sk != SECURITY_KEYPAD_ARMED_HOME) {
         if (delay > 0) {
-            state.armingIn = state.keypadConfig.armHomeDelay
-            // Added conditions for digital control distinction
+            state.armingIn = delay
+            // Digital Submit - Keypad was told to arm via hub command.
             if (state.type == 'digital' && al != 'armingHome') {
                 if (logEnable) {
-                    log.debug "In armHome (${version()}) alarm: ${al} - Validation for first digital submit"
+                    log.debug "armHome | alarm: ${al} - Validation for first digital submit"
                 }
-                // Event for HSM.
-                sendEvent(name:'armingIn', value: state.keypadConfig.armHomeDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_STAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_STAY].hsmCmd], isStateChange:true)
-                // Set variable to for second digital submit
+                // Change status to avoid looping.
                 changeStatus('armingHome')
+                // Trigger HSM to begin arming.
+                sendEvent(name:'armingIn', value: delay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_STAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_STAY].hsmCmd], isStateChange:true)
                 if (logEnable) {
-                    log.debug "In armHome (${version()}) - armingIn: ${state.armingIn}"
+                    log.debug "armHome | armingIn: ${state.armingIn}"
                 }
                 exitDelay(delay)
                 runIn(delay, armHomeEnd)
             }
-            // Added conditions for digital control distinction
+            // Physical Submit - Keypad was told to arm via button press.
             if (state.type == 'physical' && al != 'armingHome') {
                 if (logEnable) {
-                    log.debug "In armHome (${version()}) alarm: ${al} - Validation for first physical submit"
+                    log.debug "armHome | alarm: ${al} - Validation for first physical submit"
                 }
                 // Set variable to for second digital submit
                 changeStatus('armingHome')
                 if (logEnable) {
-                    log.debug "In armHome (${version()}) - armingIn: ${state.armingIn}"
+                    log.debug "armHome | - armingIn: ${state.armingIn}"
                 }
                 exitDelay(delay)
                 runIn(delay, armHomeEnd)
             } else if (al == 'armingHome') {
                 if (logEnable) {
-                    log.debug "In armHome (${version()}) - Second Submission from HSM, not sending HSM update"
+                    log.debug "armHome | Already armingHome, not dispatching any events."
                 }
             }
-            if (logEnable) {
-                log.debug "In armHome (${version()}) - armingIn: ${state.armingIn}"
-            }
         } else {
+            // No delay, so immediately proceed to armHomeEnd()
             armHomeEnd()
         }
     } else {
         if (logEnable) {
-            log.debug "In armHome - securityKeypad already set to 'armed home', so skipping."
+            log.debug "armHome | securityKeypad already set to ${SECURITY_KEYPAD_ARMED_HOME}, skipping."
         }
     }
 }
@@ -550,11 +539,11 @@ void armHomeEnd() {
     }
     def sk = device.currentValue('securityKeypad')
     if (logEnable) {
-        log.debug "In armHomeEnd (${version()}) - sk: ${sk} code: ${state.code} type: ${state.type} delay: ${delay}"
+        log.debug "armHomeEnd | sk: ${sk} code: ${state.code} type: ${state.type} delay: ${delay}"
     }
     if (sk == 'exit delay') {
         if (logEnable) {
-            log.debug "In armHomeEnd (${version()}) sk: ${sk} Executing after delayed arming"
+            log.debug "armHomeEnd | Executing after delayed arming"
         }
         keypadUpdateStatus(INDICATOR_TYPE_ARMED_STAY, state.type, state.code)
         alarmStatusChangeNow()
@@ -563,7 +552,7 @@ void armHomeEnd() {
     }
     else if (sk != 'armed home') {
         if (logEnable) {
-            log.debug "In armHomeEnd (${version()}) sk: ${sk} Executing immediate arming"
+            log.debug "armHomeEnd | Executing immediate arming"
         }
         keypadUpdateStatus(INDICATOR_TYPE_ARMED_STAY, state.type, state.code)
         if (state.type == 'digital') {
@@ -576,55 +565,42 @@ void armHomeEnd() {
     }
 }
 
-void disarm(delay = 0) {
-    if (logEnable) {
-        log.debug "In disarm (${version()}) - delay: ${delay}"
-    }
+void disarm() {
     def sk = device.currentValue('securityKeypad')
     if (logEnable) {
-        log.debug "In disarm (${version()}) - sk: ${sk}"
+        log.debug "disarm | delay: ${delay}"
+        log.debug "disarm | sk: ${sk}"
     }
-    if (sk != 'disarmed') {
-        if (delay > 0) {
-            exitDelay(delay)
-            runIn(delay, disarmEnd)
-        } else {
-            disarmEnd()
+    if (sk != SECURITY_KEYPAD_DISARMED) {
+        if (!state.code) {
+            state.code = ''
         }
-    } else {
-        if (logEnable) {
-            log.debug "In disarm - securityKeypad already set to 'disarmed', so skipping."
+        if (!state.type) {
+            state.type = 'physical'
         }
-    }
-}
 
-void disarmEnd() {
-    if (!state.code) {
-        state.code = ''
-    }
-    if (!state.type) {
-        state.type = 'physical'
-    }
-    def sk = device.currentValue('securityKeypad')
-    if (logEnable) {
-        log.debug "In disarmEnd (${version()}) - sk: ${sk} code: ${state.code} type: ${state.type}"
-    }
-    if (sk != 'disarmed') {
-        Date now = new Date()
+        log.debug "disarm | disarming HSM and clearing keypad state"
+        sendLocationEvent(name: 'hsmSetArm', value: 'disarm') // Disarm HSM
         keypadUpdateStatus(INDICATOR_TYPE_DISARMED, state.type, state.code)  // Sends status to Keypad
-        sendLocationEvent(name: 'hsmSetArm', value: 'disarm')
-        alarmStatusChangeNow()
+        alarmStatusChangeNow() // Record alarm state change.
+
+        // Clear state, unschedule anything that may have been scheduled due to an arming delay
+        // in case this is a canceled arming.
         changeStatus('off')
         state.armingIn = 0
         unschedule(armHomeEnd)
         unschedule(armAwayEnd)
         unschedule(changeStatus)
+    } else {
+        if (logEnable) {
+            log.debug "disarm | securityKeypad already set to ${SECURITY_KEYPAD_DISARMED} skipping."
+        }
     }
 }
 
 void exitDelay(delay) {
     if (logEnable) {
-        log.debug "In exitDelay - delay: ${delay}"
+        log.debug "exitDelay | delay: ${delay}"
     }
     if (delay) {
         sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:INDICATOR_TYPE_EXIT_DELAY, propertyId:7, value:delay.toInteger()]]).format())
@@ -633,14 +609,14 @@ void exitDelay(delay) {
         type = state.code != '' ? 'physical' : 'digital'
         eventProcess(name: 'securityKeypad', value: 'exit delay', type: type, data: state.code)
         if (logEnable) {
-            log.debug "In exitDelay - type: ${type}"
+            log.debug "exitDelay | type: ${type}"
         }
     }
 }
 
 private void changeStatus(status) {
     if (logEnable) {
-        log.debug "In changeStatus - new status: ${status}"
+        log.debug "changeStatus | alarm: ${status}"
     }
     sendEvent(name: 'alarm', value: status, isStateChange: true)
 }
@@ -1012,7 +988,7 @@ void zwaveEvent(hubitat.zwave.commands.basicv1.BasicReport cmd) {
 
 void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification cmd) {
     if (logEnable) {
-        log.debug "${cmd}"
+        log.debug "EntryControlNotification | ${cmd}"
     }
 
     Map ecn = [:]
@@ -1026,33 +1002,35 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
     String code = (cmd.eventData.collect { (char) it }.join() as String)
 
     if (logEnable) {
-        log.debug "Entry control: ${ecn} keycache: ${code}"
+        log.debug "EntryControlNotification | Code: ${code}"
     }
     switch (ecn.eventType) {
         case EVENT_TYPE_ARM_AWAY:
             if (logEnable) {
-                log.debug 'Away Mode Button'
+                log.debug 'EntryControlNotification | Away Mode Button'
             }
             if (validatePin(code) || instantArming) {
+                if (logEnable) {
+                    log.debug "EntryControlNotification | Code Passed - currentStatus: ${currentStatus}"
+                }
+                // Currently disarmed, trigger HSM mode change via event.
                 if (currentStatus == 'disarmed') {
-                    if (logEnable) {
-                        log.debug "Passed - currentStatus: ${currentStatus}"
-                    }
                     state.type = 'physical'
-                    if (!state.keypadConfig.armAwayDelay) {
-                        state.keypadConfig.armAwayDelay = 0
+                    state.keypadConfig.armAwayDelay = state.keypadConfig.armAwayDelay ? state.keypadConfig.armAwayDelay : 0
+                    if (logEnable) {
+                        log.debug "EntryControlNotification | Issuing armingIn event with delay ${state.keypadConfig.armAwayDelay}"
                     }
                     // Indicate 'armingIn' event to HSM. HSM subscribes to this event and will call armAway() after the delay.
                     // If arming fails (bypass failure etc), HSM will not call armAway and we'll return to normal.
                     sendEvent(name:'armingIn', descriptionText: "Arming AWAY mode in ${state.keypadConfig.armAwayDelay} delay", value: state.keypadConfig.armAwayDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_AWAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_AWAY].hsmCmd], isStateChange:true)
                 } else {
                     if (logEnable) {
-                        log.debug "Failed - Please Disarm Alarm before changing alarm type - currentStatus: ${currentStatus}"
+                        log.debug "EntryControlNotification | Failed - Please Disarm Alarm before changing alarm type - currentStatus: ${currentStatus}"
                     }
                 }
             } else {
                 if (logEnable) {
-                    log.debug "Failed - Invalid PIN - currentStatus: ${currentStatus}"
+                    log.debug "EntryControlNotification | Failed - Invalid PIN - currentStatus: ${currentStatus}"
                 }
                 notifyInvalidCode()
             }
