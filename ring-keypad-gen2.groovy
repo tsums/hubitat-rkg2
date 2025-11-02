@@ -1375,7 +1375,6 @@ private void notifyInvalidCode() {
 
 private void alarmStatusChangeNow() {
     Date now = new Date()
-    sendLocationEvent(name: 'hsmSetArm', value: 'armNight')
     sendEvent(name:'alarmStatusChangeTime', value: "${now}", isStateChange:true)
     long ems = now.getTime()
     sendEvent(name:'alarmStatusChangeEpochms', value: "${ems}", isStateChange:true)
