@@ -399,39 +399,30 @@ void armAway(delay=state.keypadConfig.armAwayDelay) {
     }
     if (sk != SECURITY_KEYPAD_ARMED_AWAY) {
         if (delay > 0) {
-            state.armingIn = delay
-            // Digital Submit - Keypad was told to arm via hub command.
-            if (state.type == 'digital' && al != 'armingAway') {
+            // If we're already armingAway, don't dispatch any events. This happens when
+            // HSM sends a duplicate event during delayed arming.
+            if (al == 'armingAway') {
                 if (logEnable) {
-                    log.debug "armAway | alarm: ${al} - Validation for first digital submit"
+                    log.debug "armAway | Already armingAway, not dispatching any events."
                 }
+            } else {
+                if (logEnable) {
+                    log.debug "armAway | alarm: ${al} - Proceeding with arming away."
+                }
+                state.armingIn = delay
                 // Change status to avoid looping.
                 changeStatus('armingAway')
-                // Trigger HSM to begin arming.
-                sendEvent(name:'armingIn', value: state.keypadConfig.armAwayDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_AWAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_AWAY].hsmCmd], isStateChange:true)
+                if (state.type == 'digital') {
+                    // If this was a digital event, then we didn't trigger HSM during the processing
+                    // of the EntryControlNotification. Trigger HSM to begin arming.
+                    sendEvent(name:'armingIn', value: state.keypadConfig.armAwayDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_AWAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_AWAY].hsmCmd], isStateChange:true)
+                }
                 if (logEnable) {
                     log.debug "armAway | armingIn: ${state.armingIn}"
                 }
                 exitDelay(delay)
                 runIn(delay, armAwayEnd)
             }
-            // Physical Submit - Keypad was told to arm via button press.
-            if (state.type == 'physical' && al != 'armingAway') {
-                if (logEnable) {
-                    log.debug "armAway | alarm: ${al} - Validation for first physical submit"
-                }
-                // Change status to avoid looping.
-                changeStatus('armingAway')
-                if (logEnable) {
-                    log.debug "armAway | armingIn: ${state.armingIn}"
-                }
-                exitDelay(delay)
-                runIn(delay, armAwayEnd)
-            } else if (al == 'armingAway') {
-                if (logEnable) {
-                    log.debug "armAway | Already armingAway, not dispatching any events."
-                }
-            } 
         } else {
             armAwayEnd()
         }
@@ -487,38 +478,33 @@ void armHome(delay = state.keypadConfig.armHomeDelay) {
     }
     if (sk != SECURITY_KEYPAD_ARMED_HOME) {
         if (delay > 0) {
-            state.armingIn = delay
-            // Digital Submit - Keypad was told to arm via hub command.
-            if (state.type == 'digital' && al != 'armingHome') {
+            // If we're already armingHome, don't dispatch any events. This happens when
+            // HSM sends a duplicate event during delayed arming.
+            if (al == 'armingHome') {
                 if (logEnable) {
-                    log.debug "armHome | alarm: ${al} - Validation for first digital submit"
+                    log.debug "armHome | Already armingHome, not dispatching any events."
                 }
+                return
+            } else {
+                if (logEnable) {
+                    log.debug "armHome | alarm: ${al} - Proceeding with arming home."
+                }
+                state.armingIn = delay
                 // Change status to avoid looping.
-                changeStatus('armingHome')
-                // Trigger HSM to begin arming.
-                sendEvent(name:'armingIn', value: delay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_STAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_STAY].hsmCmd], isStateChange:true)
-                if (logEnable) {
-                    log.debug "armHome | armingIn: ${state.armingIn}"
-                }
-                exitDelay(delay)
-                runIn(delay, armHomeEnd)
-            }
-            // Physical Submit - Keypad was told to arm via button press.
-            if (state.type == 'physical' && al != 'armingHome') {
-                if (logEnable) {
-                    log.debug "armHome | alarm: ${al} - Validation for first physical submit"
-                }
-                // Set variable to for second digital submit
                 changeStatus('armingHome')
                 if (logEnable) {
                     log.debug "armHome | - armingIn: ${state.armingIn}"
                 }
+                if (state.type == 'digital') {
+                    if (logEnable) {
+                        log.debug "armHome | Digital arming triggered, sending armingIn event to HSM."
+                    }
+                    // If this was a digital event, then we didn't trigger HSM during the processing
+                    // of the EntryControlNotification. Trigger HSM to begin arming.
+                    sendEvent(name:'armingIn', value: delay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_STAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_STAY].hsmCmd], isStateChange:true)
+                }
                 exitDelay(delay)
                 runIn(delay, armHomeEnd)
-            } else if (al == 'armingHome') {
-                if (logEnable) {
-                    log.debug "armHome | Already armingHome, not dispatching any events."
-                }
             }
         } else {
             // No delay, so immediately proceed to armHomeEnd()
