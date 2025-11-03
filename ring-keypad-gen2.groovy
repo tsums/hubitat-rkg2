@@ -117,9 +117,9 @@ metadata {
         fingerprint mfr:'0346', prod:'0101', deviceId:'0301', inClusters:'0x5E,0x98,0x9F,0x6C,0x55', deviceJoinName: 'Ring Alarm Keypad G2'
     }
     preferences {
-        input name: 'about', type: 'paragraph', element: 'paragraph', title: 'Ring Alarm Keypad G2 HSM Driver', description: "${version()}<br>Note:<br>The first 3 Tones are alarm sounds that also flash the Red Indicator Bar on the keypads. The rest are more pleasant sounds that could be used for a variety of things."
+        input name: 'about', type: 'paragraph', element: 'paragraph', title: 'Ring Alarm Keypad G2 HSM Driver', description: "${version()}<br>Note:<br>The first 3 Tones are alarm sounds (Siren, Smoke Alarm, CO Alarm) and will flash the indicator bar. The remaining sounds are chime sounds. The invalid code sound also flashes the keypad numbers."
         configParams.each { input it.value.input }
-        input name: 'theTone', type: 'enum', title: 'Chime tone', options: [
+        input name: 'theTone', type: 'enum', title: 'Default Chime Tone', options: [
             ['Tone_1':'(Tone_1) Siren (default)'],
             ['Tone_2':'(Tone_2) Smoke Alarm'],
             ['Tone_3':'(Tone_3) CO Alarm'],
@@ -158,7 +158,17 @@ metadata {
     (INDICATOR_TYPE_ARMED_STAY): [securityKeypadState: 'armed home', hsmCmd: 'armHome'],
     (INDICATOR_TYPE_ARMED_AWAY): [securityKeypadState: 'armed away', hsmCmd: 'armAway'],
 ]
-@Field static Map CMD_CLASS_VERS = [0x70:1, 0x20:1, 0x86:3, 0x6F:1]
+@Field static Map CMD_CLASS_VERS = [
+    0x20: 1, // Basic V1
+    0x6F: 1, // Entry Control V1
+    0x70: 1, // Configuration V1
+    0x71: 8, // Notification V8
+    0x80: 1, // Battery V1
+    0x85: 2, // Association V2
+    0x86: 3, // Version V3
+    0x87: 3, // Indicator V3
+    0x98: 1  // Security V1
+]
 // These are factory sounds that can't be changed, so just emit them as the supported sound effects.
 @Field static String SOUND_EFFECTS = '{"1":"siren", "2":"smoke alarm", "3":"co alarm", "4":"navi", "5":"guitar", "6":"windchimes", "7":"doorbell 1", "8":"doorbell 2", "9":"invalid code"}'
 @Field static Map SOUND_EFFECTS_TO_INDICATOR_ID = [
