@@ -631,18 +631,19 @@ void entry(entranceDelay) {
 
 void playSound(soundnumber) {
     if (logEnable) {
-        log.debug "playSound(${soundnumber})"
+        log.debug "playSound | sound: ${soundnumber}"
     }
     volSiren()
 
     if (SOUND_EFFECTS_TO_INDICATOR_ID[soundnumber.intValue()]) {
+        // Chime uses the siren volume. Maybe should use the announcement volume?
         int playVolume = device.currentValue('volSiren') * 10
         if (logEnable) {
-            log.debug "Play sound ${soundnumber} at volueme ${playVolume}"
+            log.debug "playSound | ${soundnumber} at volume ${playVolume}"
         }
         sendSoundCommand(SOUND_EFFECTS_TO_INDICATOR_ID[soundnumber.intValue()], playVolume)
     } else {
-        log.warn "Sound ${soundnumnber} unsupported."
+        log.warn "playSound | sound ${soundnumnber} unsupported."
     }
     
 }
@@ -702,7 +703,7 @@ void hold(btn) {
 
 void getCodes() {
     if (logEnable) {
-        log.debug 'getCodes()'
+        log.debug 'getCodes |'
     }
     updateEncryption()
 }
@@ -728,7 +729,7 @@ private Boolean validatePin(String pincode) {
     try {
         lockcodes = parseJson(configCodes)
     } catch (e) {
-        log.warn 'No lock codes found.'
+        log.warn 'validatePin | No lock codes found.'
     }
 
     if (lockcodes) {
@@ -757,7 +758,7 @@ private Boolean validatePin(String pincode) {
 
 void setCode(codeposition, pincode, name) {
     if (logEnable) {
-        log.debug "setCode(${codeposition}, ${pincode}, ${name})"
+        log.debug "setCode | pos: ${codeposition}, code: ${pincode}, name: ${name})"
     }
     boolean newCode = true
     Map lockcodes = [:]
@@ -786,7 +787,7 @@ void setCode(codeposition, pincode, name) {
 
 void deleteCode(codeposition) {
     if (logEnable) {
-        log.debug "deleteCode(${codeposition})"
+        log.debug "deleteCode | code : ${codeposition}"
     }
     Map lockcodes = [:]
     if (device.currentValue('lockCodes') != null) {
@@ -811,7 +812,7 @@ List<String> runConfigs() {
     configParams.each { param, data ->
         if (settings[data.input.name]) {
             if (logEnable) {
-                log.debug "Configuring parameter: ${param} to ${settings[data.input.name]}"
+                log.debug "runConfigs | Set parameter: ${param} to ${settings[data.input.name]}"
             }
             cmds.addAll(configCmd(param, data.parameterSize, settings[data.input.name]))
         }
@@ -820,11 +821,12 @@ List<String> runConfigs() {
 }
 
 List<String> pollConfigs() {
+    if (logEnable) {
+        log.debug "pollConfigs |"
+    }
     List<String> cmds = []
     configParams.each { param, data ->
-        if (settings[data.input.name]) {
-            cmds.add(zwave.configurationV1.configurationGet(parameterNumber: param.toInteger()).format())
-        }
+        cmds.add(zwave.configurationV1.configurationGet(parameterNumber: param.toInteger()).format())
     }
     return cmds
 }
@@ -1095,11 +1097,11 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
             if (validateCheck) {
                 if (validatePin(code)) {
                     if (logEnable) {
-                        log.debug 'Generic Code Enter - Code Passed'
+                        log.debug 'EntryControlNotification | Generic Code Enter - Code Passed'
                     }
                 } else {
                     if (logEnable) {
-                        log.debug "Generic Code Enter - Code Failed - Invalid PIN - currentStatus: ${currentStatus}"
+                        log.debug "EntryControlNotification | Generic Code Enter - Code Failed - Invalid PIN - currentStatus: ${currentStatus}"
                     }
                     notifyInvalidCode()
                 }
