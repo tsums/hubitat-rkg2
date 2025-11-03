@@ -835,6 +835,9 @@ List<String> configCmd(parameterNumber, size, scaledConfigurationValue) {
 // Z-Wave Event Handling
 
 void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) {
+    if (logEnable) {
+        log.debug "ConfigurationReport | ${cmd}"
+    }
     if (configParams[cmd.parameterNumber.toInteger()]) {
         Map configParam = configParams[cmd.parameterNumber.toInteger()]
         int scaledValue
@@ -842,13 +845,16 @@ void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) 
             scaledValue = scaledValue | v << (8 * index)
         }
         if (logEnable) {
-            log.debug "Configuration Report: ${configParam.input.name} is [${scaledValue}]"
+            log.debug "ConfigurationReport: ${configParam.input.name} is [${scaledValue}]"
         }
         device.updateSetting(configParam.input.name, [value: "${scaledValue}", type: configParam.input.type])
     }
 }
 
 void zwaveEvent(hubitat.zwave.commands.batteryv1.BatteryReport cmd) {
+    if (logEnable) {
+        log.debug "BatteryReport | ${cmd}"
+    }
     Map evt = [name: 'battery', unit: '%']
     if (cmd.batteryLevel == 0xFF) {
         evt.descriptionText = "${device.displayName} has a low battery"
@@ -866,7 +872,8 @@ void zwaveEvent(hubitat.zwave.commands.batteryv1.BatteryReport cmd) {
 
 void zwaveEvent(hubitat.zwave.commands.manufacturerspecificv2.DeviceSpecificReport cmd) {
     if (logEnable) {
-        log.debug "Device Specific Report - DeviceIdType: ${cmd.deviceIdType}, DeviceIdFormat: ${cmd.deviceIdDataFormat}, Data: ${cmd.deviceIdData}"
+        log.debug "DeviceSpecificReport | ${cmd}"
+        log.debug "DeviceSpecificReport | DeviceIdType: ${cmd.deviceIdType}, DeviceIdFormat: ${cmd.deviceIdDataFormat}, Data: ${cmd.deviceIdData}"
     }
     if (cmd.deviceIdType == 1) {
         String serialNumber = ''
@@ -883,7 +890,8 @@ void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
     Double firmware0Version = cmd.firmware0Version + (cmd.firmware0SubVersion / 100)
     Double protocolVersion = cmd.zWaveProtocolVersion + (cmd.zWaveProtocolSubVersion / 100)
     if (logEnable) {
-        log.debug "Version Report - FirmwareVersion: ${firmware0Version}, ProtocolVersion: ${protocolVersion}, HardwareVersion: ${cmd.hardwareVersion}"
+        log.debug "VersionReport | ${cmd}"
+        log.debug "VersionReport | FirmwareVersion: ${firmware0Version}, ProtocolVersion: ${protocolVersion}, HardwareVersion: ${cmd.hardwareVersion}"
     }
     device.updateDataValue('firmwareVersion', "${firmware0Version}")
     device.updateDataValue('protocolVersion', "${protocolVersion}")
@@ -898,7 +906,7 @@ void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
 
 void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd) {
     if (logEnable) {
-        log.info "Notification Report: ${cmd}"
+        log.info "NotificationReport | ${cmd}"
     }
     Map evt = [:]
     if (cmd.notificationType == NOTIFICATION_TYPE_POWER_MANAGEMENT) {
@@ -937,11 +945,11 @@ void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd) {
             evt.value = 'inactive'
         } else if (cmd.event == 0 && cmd.notificationStatus == 255) {
             // According to the manual, this is a "Dropped Frame" notification.
-            log.warn "${device.displayName} reports a dropped frame!."
+            log.warn "NotificationReport | ${device.displayName} reports a dropped frame!."
         } else if (cmd.event == 0 && cmd.notificationStatus == 0) {
-            log.info "${device.displayName} reports that dropped frames condition has cleared."
+            log.info "NotificationReport | ${device.displayName} reports that dropped frames condition has cleared."
         } else {
-            log.warn "Unhandled Notification (Security): ${cmd}"
+            log.warn "NotificationReport | Unhandled (Security): ${cmd}"
         }
         if (evt.name) {
             evt.descriptionText = "${device.displayName} ${evt.name} is ${evt.value}"
@@ -953,20 +961,20 @@ void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd) {
     }
     else {
         if (logEnable) {
-            log.debug "Unhandled NotificationReport: ${cmd}"
+            log.debug "NotificationReport | Unhandled: ${cmd}"
         }
     }
 }
 
 void zwaveEvent(hubitat.zwave.commands.indicatorv3.IndicatorReport cmd) {
     if (logEnable) {
-        log.debug "Indicator Report: ${cmd}"
+        log.debug "IndicatorReport | ${cmd}"
     }
 }
 
 void zwaveEvent(hubitat.zwave.commands.basicv1.BasicReport cmd) {
     if (logEnable) {
-        log.debug "${cmd}"
+        log.debug "BasicReport | ${cmd}"
     }
 }
 
@@ -1138,42 +1146,46 @@ void zwaveEvent(hubitat.zwave.commands.associationv2.AssociationReport cmd) {
         }
     }
     if (logEnable) {
-        log.debug "Association Report - Group: ${cmd.groupingIdentifier}, Nodes: $temp"
+        log.debug "AssociationReport | ${cmd}"
+        log.debug "AssociationReport | Group: ${cmd.groupingIdentifier}, Nodes: $temp"
     }
 }
 
 void zwaveEvent(hubitat.zwave.Command cmd) {
     if (logEnable) {
-        log.debug "skip: ${cmd}"
+        log.debug "Command | Unhandled Command: ${cmd}"
     }
 }
 
 void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation cmd) {
     if (logEnable) {
-        log.debug "S2 Encapsulation: ${cmd}"
+        log.debug "SecurityMessageEncapsulation | ${cmd}"
     }
     hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(CMD_CLASS_VERS)
     if (encapsulatedCommand) {
+        log.debug "SecurityMessageEncapsulation | Processing encapsulated: ${encapsulatedCommand}"
         zwaveEvent(encapsulatedCommand)
     }
 }
 
 void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
     if (logEnable) {
-        log.debug "Supervision Get - SessionID: ${cmd.sessionID}, CC: ${cmd.commandClassIdentifier}, Command: ${cmd.commandIdentifier}"
+        log.debug "SupervisionGet | ${cmd}"
     }
 
     hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(CMD_CLASS_VERS)
     if (encapsulatedCommand) {
+        log.debug "SupervisionGet | Processing encapsulated: ${encapsulatedCommand}"
         zwaveEvent(encapsulatedCommand)
     }
 
+    log.debug "SupervisionGet | Sending SupervisionReport for sessionID: ${cmd.sessionID}"
     sendToDevice(zwave.supervisionV1.supervisionReport(sessionID: cmd.sessionID, reserved: 0, moreStatusUpdates: false, status: 0xFF, duration: 0).format())
 }
 
 void parse(String event) {
     if (logEnable) {
-        log.debug "parse - ${event}"
+        log.debug "parse | ${event}"
     }
     hubitat.zwave.Command cmd = zwave.parse(event, CMD_CLASS_VERS)
     if (cmd) {
@@ -1183,27 +1195,27 @@ void parse(String event) {
 
 void proximitySensorHandler() {
     if (proximitySensor) {
-        if (logEnable) log.debug 'Turning the Proximity Sensor OFF'
+        if (logEnable) log.debug 'proximitySensorHandler | Turning the Proximity Sensor OFF'
         sendToDevice(new hubitat.zwave.commands.configurationv1.ConfigurationSet(parameterNumber: 15, size: 1, scaledConfigurationValue: 0).format())
     } else {
-        if (logEnable) log.debug 'Turning the Proximity Sensor ON'
+        if (logEnable) log.debug 'proximitySensorHandler | Turning the Proximity Sensor ON'
         sendToDevice(new hubitat.zwave.commands.configurationv1.ConfigurationSet(parameterNumber: 15, size: 1, scaledConfigurationValue: 1).format())
     }
 }
 
 def volAnnouncement(newVol=null) {
     if (logEnable) {
-        log.debug "In volAnnouncement (${version()}) - newVol: ${newVol}"
+        log.debug "volAnnouncement | newVol: ${newVol}"
     }
     if (newVol) {
         def currentVol = device.currentValue('volAnnouncement')
         if (newVol.toString() == currentVol.toString()) {
             if (logEnable) {
-                log.debug "Announcement Volume hasn't changed, so skipping"
+                log.debug "volAnnouncement | Announcement Volume hasn't changed, so skipping"
             }
         } else {
             if (logEnable) {
-                log.debug "Setting the Announcement Volume to $newVol"
+                log.debug "volAnnouncement | Setting the Announcement Volume to $newVol"
             }
             nVol = newVol.toInteger()
             sendToDevice(new hubitat.zwave.commands.configurationv1.ConfigurationSet(parameterNumber: 4, size: 1, scaledConfigurationValue: nVol).format())
@@ -1211,24 +1223,24 @@ def volAnnouncement(newVol=null) {
         }
     } else {
         if (logEnable) {
-            log.debug 'Announcement value not specified, so skipping'
+            log.debug 'volAnnouncement | Announcement value not specified, so skipping'
         }
     }
 }
 
 def volKeytone(newVol=null) {
     if (logEnable) {
-        log.debug "In volKeytone (${version()}) - newVol: ${newVol}"
+        log.debug "volKeytone | newVol: ${newVol}"
     }
     if (newVol) {
         def currentVol = device.currentValue('volKeytone')
         if (newVol.toString() == currentVol.toString()) {
             if (logEnable) {
-                log.debug "Keytone Volume hasn't changed, so skipping"
+                log.debug "volKeytone | Keytone Volume hasn't changed, so skipping"
             }
         } else {
             if (logEnable) {
-                log.debug "Setting the Keytone Volume to $newVol"
+                log.debug "volKeytone | Setting the Keytone Volume to $newVol"
             }
             nVol = newVol.toInteger()
             sendToDevice(new hubitat.zwave.commands.configurationv1.ConfigurationSet(parameterNumber: 5, size: 1, scaledConfigurationValue: nVol).format())
@@ -1236,25 +1248,25 @@ def volKeytone(newVol=null) {
         }
     } else {
         if (logEnable) {
-            log.debug 'Keytone value not specified, so skipping'
+            log.debug 'volKeytone | Keytone value not specified, so skipping'
         }
     }
 }
 
 def volSiren(newVol=null) {
     if (logEnable) {
-        log.debug "In volSiren (${version()}) - newVol: ${newVol}"
+        log.debug "volKeytone | newVol: ${newVol}"
     }
     if (newVol) {
         def currentVol = device.currentValue('volSiren')
         if (newVol.toString() == currentVol.toString()) {
             if (logEnable) {
-                log.debug "Siren Volume hasn't changed, so skipping"
+                log.debug "volKeytone | Siren Volume hasn't changed, so skipping"
             }
             def sVol = currentVol.toInteger() * 10
         } else {
             if (logEnable) {
-                log.debug "Setting the Siren Volume to $newVol"
+                log.debug "volKeytone | Setting the Siren Volume to $newVol"
             }
             sVol = newVol.toInteger() * 10
             sendToDevice(new hubitat.zwave.commands.configurationv1.ConfigurationSet(parameterNumber: 6, size: 1, scaledConfigurationValue: sVol).format())
@@ -1274,12 +1286,12 @@ def volSiren(newVol=null) {
 def playTone(tone=null) {
     volSiren()
     if (logEnable) {
-        log.debug "In playTone (${version()}) - tone: ${tone} at Volume: ${sVol}"
+        log.debug "playTone | tone: ${tone}, volume: ${sVol}"
     }
     if (!tone) {
         tone = theTone
         if (logEnable) {
-            log.debug "In playTone - Tone is NULL, so setting tone to default: ${tone}"
+            log.debug "playTone | No tone specified, using theTone setting: ${tone}"
         }
     }
     if (tone == 'Tone_1') { // Siren
@@ -1310,7 +1322,7 @@ def playTone(tone=null) {
 
 private void sendSoundCommand(soundIndicatorId, volume) {
     if (logEnable) {
-        log.debug "sendSoundCommand(${soundIndicatorId}, ${volume})"
+        log.debug "sendSoundCommand | soundIndicator : ${soundIndicatorId}, volume: ${volume})"
     }
     sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:soundIndicatorId, propertyId:INDICATOR_ID_TO_PROPERTY_ID[soundIndicatorId], value:volume]]).format())
 }
@@ -1352,7 +1364,7 @@ private List<String> setDefaultAssociation() {
 // Event filter - only emit an event if it represents a change from the current state.
 private void eventProcess(Map evt) {
     if (txtEnable && evt.descriptionText) {
-        log.info evt.descriptionText
+        log.info "event | ${evt.descriptionText}"
     }
     if (device.currentValue(evt.name).toString() != evt.value.toString()) {
         sendEvent(evt)
