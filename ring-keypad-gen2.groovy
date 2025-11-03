@@ -890,7 +890,7 @@ void zwaveEvent(hubitat.zwave.commands.batteryv2.BatteryReport cmd) {
     }
     eventProcess(levelEvt)
 
-    Map chargingEvt = [name: 'batteryStatus', value: BATTERY_STATUS_MAP[cmd.chargingStatus], isStateChange: true]
+    Map chargingEvt = [name: 'batteryStatus', value: BATTERY_STATUS_MAP[cmd.chargingStatus], descriptionText: "${device.displayName} battery is ${BATTERY_STATUS_MAP[cmd.chargingStatus]}" isStateChange: true]
     eventProcess(chargingEvt)
 }
 
