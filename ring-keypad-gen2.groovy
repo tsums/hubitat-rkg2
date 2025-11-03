@@ -23,28 +23,31 @@
     1.0.0 - 11/11/21 - Initial Community Release
 */
 
-import groovy.transform.Field
 import groovy.json.JsonOutput
-import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_DISARMED
-import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_ARMED_STAY
-import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_ARMED_AWAY
-import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_EXIT_DELAY
-import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_ENTRY_DELAY
-import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_CODE_REJECTED
+import groovy.transform.Field
+import static hubitat.zwave.commands.batteryv2.BatteryReport.CHARGING_STATUS_CHARGING
+import static hubitat.zwave.commands.batteryv2.BatteryReport.CHARGING_STATUS_DISCHARGING
+import static hubitat.zwave.commands.batteryv2.BatteryReport.CHARGING_STATUS_MAINTAINING
+import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_ALERT_MEDICAL
+import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_ARM_AWAY
+import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_ARM_HOME
+import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_CACHED_KEYS
+import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_DISARM_ALL
+import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_ENTER
+import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_FIRE
+import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_POLICE
 import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_ALARM
 import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_ALARM_CO
 import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_ALARM_SMOKE
-import static hubitat.zwave.commands.notificationv8.NotificationGet.NOTIFICATION_TYPE_POWER_MANAGEMENT
+import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_ARMED_AWAY
+import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_ARMED_STAY
+import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_CODE_REJECTED
+import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_DISARMED
+import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_ENTRY_DELAY
+import static hubitat.zwave.commands.indicatorv3.IndicatorSet.INDICATOR_TYPE_EXIT_DELAY
 import static hubitat.zwave.commands.notificationv8.NotificationGet.NOTIFICATION_TYPE_BURGLAR 
+import static hubitat.zwave.commands.notificationv8.NotificationGet.NOTIFICATION_TYPE_POWER_MANAGEMENT
 import static hubitat.zwave.commands.notificationv8.NotificationGet.NOTIFICATION_TYPE_SYSTEM 
-import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_ARM_HOME
-import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_ARM_AWAY
-import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_DISARM_ALL
-import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_ENTER
-import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_ALERT_MEDICAL
-import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_FIRE
-import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_POLICE
-import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_CACHED_KEYS
 import static hubitat.zwave.commands.supervisionv1.SupervisionReport.SUCCESS as SUPERVISION_SUCCESS
 
 @Field static Integer AC_MAINS_DISCONNECTED = 0x02
@@ -163,7 +166,7 @@ metadata {
     0x6F: 1, // Entry Control V1
     0x70: 1, // Configuration V1
     0x71: 8, // Notification V8
-    0x80: 1, // Battery V1
+    0x80: 2, // Battery V2
     0x85: 2, // Association V2
     0x86: 3, // Version V3
     0x87: 3, // Indicator V3
@@ -264,7 +267,7 @@ void refresh() {
 void pollDeviceData() {
     List<String> cmds = []
     cmds.add(zwave.versionV3.versionGet().format())
-    cmds.add(zwave.batteryV1.batteryGet().format())
+    cmds.add(zwave.batteryV2.batteryGet().format())
     // Ask for the serial number.
     cmds.add(zwave.manufacturerSpecificV2.deviceSpecificGet(deviceIdType: 1).format())
     // Poll for power status / events.
@@ -866,23 +869,29 @@ void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) 
     }
 }
 
-void zwaveEvent(hubitat.zwave.commands.batteryv1.BatteryReport cmd) {
+@Field static Map BATTERY_STATUS_MAP = [
+    (CHARGING_STATUS_CHARGING): 'charging',
+    (CHARGING_STATUS_MAINTAINING): 'maintaining',
+    (CHARGING_STATUS_DISCHARGING): 'discharging'
+]
+
+void zwaveEvent(hubitat.zwave.commands.batteryv2.BatteryReport cmd) {
     if (logEnable) {
         log.debug "BatteryReport | ${cmd}"
     }
-    Map evt = [name: 'battery', unit: '%']
+
+    Map levelEvt = [name: 'battery', unit: '%', isStateChange: true]
     if (cmd.batteryLevel == 0xFF) {
-        evt.descriptionText = "${device.displayName} has a low battery"
-        evt.value = 1
+        levelEvt.descriptionText = "${device.displayName} has a low battery"
+        levelEvt.value = 1
     } else {
-        evt.value = cmd.batteryLevel
-        evt.descriptionText = "${device.displayName} battery is ${evt.value}${evt.unit}"
+        levelEvt.value = cmd.batteryLevel
+        levelEvt.descriptionText = "${device.displayName} battery is ${levelEvt.value}${levelEvt.unit}"
     }
-    evt.isStateChange = true
-    if (txtEnable && evt.descriptionText) {
-        log.info evt.descriptionText
-    }
-    sendEvent(evt)
+    eventProcess(levelEvt)
+
+    Map chargingEvt = [name: 'batteryStatus', value: BATTERY_STATUS_MAP[cmd.chargingStatus], isStateChange: true]
+    eventProcess(chargingEvt)
 }
 
 void zwaveEvent(hubitat.zwave.commands.manufacturerspecificv2.DeviceSpecificReport cmd) {
