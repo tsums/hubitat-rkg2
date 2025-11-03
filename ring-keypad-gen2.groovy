@@ -45,6 +45,7 @@ import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVE
 import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_FIRE
 import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_POLICE
 import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_CACHED_KEYS
+import static hubitat.zwave.commands.supervisionv1.SupervisionGet.SUCCESS as SUPERVISION_SUCCESS
 
 @Field static Integer AC_MAINS_DISCONNECTED = 0x02
 @Field static Integer AC_MAINS_RECONNECTED = 0x03
@@ -140,12 +141,15 @@ metadata {
 
 @Field static Map configParams = [
     1: [input: [name: 'configParam1', type: 'number', title: 'Heartbeat Interval', description:'Number of minutes in between battery reports.', defaultValue: 70, range:'1..70'], parameterSize:1],
+    2: [input: [name: 'configParam2', type: 'number', title: 'Application Level Retries', description:'Number of application level retries attempted for messages either not ACKed or messages encapsulated via supervision get that did not receive a report.', defaultValue: 1, range:'0..5'], parameterSize:1],
+    3: [input: [name: 'configParam3', type: 'number', title: 'Application Level Retry Base Wait Time Period', description:'The number base seconds used in the calculation for sleeping between retry messages.', defaultValue: 5, range:'1..60'], parameterSize:1],
     7: [input: [name: 'configParam7', type: 'number', title: 'Long press Emergency Duration', description:'', defaultValue: 3, range:'2..5'], parameterSize:1],
     8: [input: [name: 'configParam8', type: 'number', title: 'Long press Number pad Duration', description:'', defaultValue: 3, range:'2..5'], parameterSize:1],
     10: [input: [name: 'configParam10', type: 'number', title: 'Button Press Display Timeout', description:'Timeout in seconds when any button is pressed', defaultValue: 5, range:'0..30'], parameterSize:1],
     11: [input: [name: 'configParam11', type: 'number', title: 'Status Change Display Timeout', description:'Timeout in seconds when indicator command is received from the hub tochange status', defaultValue: 5, range:'0..30'], parameterSize:1],
     12: [input: [name: 'configParam12', type: 'number', title: 'Security Mode Brightness', description:'', defaultValue: 100, range:'0..100'], parameterSize:1],
     13: [input: [name: 'configParam13', type: 'number', title: 'Key Backlight Brightness', description:'', defaultValue: 100, range:'0..100'], parameterSize:1],
+    20: [input: [name: 'configParam20', type: 'number', title: 'Supervisory Report Retry Timeout', description:'The number of milliseconds waiting for a Supervisory Report response to a Supervisory Get encapsulated command from the device before attempting a retry.', defaultValue: 1500, range:'500..5000'], parameterSize:2],
     22: [input: [name: 'configParam22', type: 'number', title: 'System Security Mode Display', description:'601 = Always On, 1 - 600 = periodic interval, 0 = Always Off, except activity', defaultValue: 0, range:'0..601'], parameterSize:2],
 ]
 @Field static Map armingStates = [
@@ -1180,7 +1184,7 @@ void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
     }
 
     log.debug "SupervisionGet | Sending SupervisionReport for sessionID: ${cmd.sessionID}"
-    sendToDevice(zwave.supervisionV1.supervisionReport(sessionID: cmd.sessionID, reserved: 0, moreStatusUpdates: false, status: 0xFF, duration: 0).format())
+    sendToDevice(zwave.supervisionV1.supervisionReport(sessionID: cmd.sessionID, reserved: 0, moreStatusUpdates: false, status: SUPERVISION_SUCCESS, duration: 0).format())
 }
 
 void parse(String event) {
