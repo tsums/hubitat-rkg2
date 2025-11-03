@@ -45,7 +45,7 @@ import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVE
 import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_FIRE
 import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_POLICE
 import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_CACHED_KEYS
-import static hubitat.zwave.commands.supervisionv1.SupervisionGet.SUCCESS as SUPERVISION_SUCCESS
+import static hubitat.zwave.commands.supervisionv1.SupervisionReport.SUCCESS as SUPERVISION_SUCCESS
 
 @Field static Integer AC_MAINS_DISCONNECTED = 0x02
 @Field static Integer AC_MAINS_RECONNECTED = 0x03
