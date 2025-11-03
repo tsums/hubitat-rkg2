@@ -132,7 +132,6 @@ metadata {
         ], defaultValue: 'Tone_1', description: 'Default tone for playback.'
         input name: 'instantArming', type: 'bool', title: 'Enable Codeless Arming', defaultValue: false, description: 'If enabled, system can be armed without a valid code.'
         input name: 'validateCheck', type: 'bool', title: 'Validate codes submitted with checkmark', defaultValue: false, description: 'Allow valid code submission with the check button.'
-        input name: 'proximitySensor', type: 'bool', title: 'Disable the Proximity Sensor', defaultValue: false, description: 'Disable the proximity sensor. Note: no motion events will be received. Useful since we suspect on newer firmware the motion sensor causes the keypad to lock up.'
         input name: 'optEncrypt', type: 'bool', title: 'Enable lock code encryption', defaultValue: false, description: 'Encrypt lock codes inside the driver.'
         input name: 'logEnable', type: 'bool', title: 'Enable debug logging', defaultValue: true
         input name: 'txtEnable', type: 'bool', title: 'Enable descriptionText logging', defaultValue: true
@@ -149,6 +148,7 @@ metadata {
     11: [input: [name: 'configParam11', type: 'number', title: 'Status Change Display Timeout', description:'Timeout in seconds when indicator command is received from the hub tochange status', defaultValue: 5, range:'0..30'], parameterSize:1],
     12: [input: [name: 'configParam12', type: 'number', title: 'Security Mode Brightness', description:'', defaultValue: 100, range:'0..100'], parameterSize:1],
     13: [input: [name: 'configParam13', type: 'number', title: 'Key Backlight Brightness', description:'', defaultValue: 100, range:'0..100'], parameterSize:1],
+    15: [input: [name: 'configParam15', type: 'bool', title: 'Proximity Sensor', description: 'Controls the proximity sensor and accompanying motion reports.', defaultValue: true], parameterSize:1],
     20: [input: [name: 'configParam20', type: 'number', title: 'Supervisory Report Retry Timeout', description:'The number of milliseconds waiting for a Supervisory Report response to a Supervisory Get encapsulated command from the device before attempting a retry.', defaultValue: 1500, range:'500..5000'], parameterSize:2],
     22: [input: [name: 'configParam22', type: 'number', title: 'System Security Mode Display', description:'601 = Always On, 1 - 600 = periodic interval, 0 = Always Off, except activity', defaultValue: 0, range:'0..601'], parameterSize:2],
 ]
@@ -212,7 +212,6 @@ void updated() {
     }
     sendToDevice(runConfigs())
     updateEncryption()
-    proximitySensorHandler()
     volAnnouncement()
     volKeytone()
     volSiren()
@@ -1206,16 +1205,6 @@ void parse(String event) {
     hubitat.zwave.Command cmd = zwave.parse(event, CMD_CLASS_VERS)
     if (cmd) {
         zwaveEvent(cmd)
-    }
-}
-
-void proximitySensorHandler() {
-    if (proximitySensor) {
-        if (logEnable) log.debug 'proximitySensorHandler | Turning the Proximity Sensor OFF'
-        sendToDevice(new hubitat.zwave.commands.configurationv1.ConfigurationSet(parameterNumber: 15, size: 1, scaledConfigurationValue: 0).format())
-    } else {
-        if (logEnable) log.debug 'proximitySensorHandler | Turning the Proximity Sensor ON'
-        sendToDevice(new hubitat.zwave.commands.configurationv1.ConfigurationSet(parameterNumber: 15, size: 1, scaledConfigurationValue: 1).format())
     }
 }
 
