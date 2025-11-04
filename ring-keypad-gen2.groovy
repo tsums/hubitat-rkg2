@@ -959,6 +959,9 @@ void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd) {
                 }
                 break
         }
+        // Request an updated battery report whenever we get a power management notification.
+        // This ensures we can keep `batteryStatus` up to date.
+        sendToDevice(zwave.batteryV2.batteryGet().format())
     }
     else if (cmd.notificationType == NOTIFICATION_TYPE_BURGLAR) {
         if (cmd.event == MOTION_DETECTION) {
