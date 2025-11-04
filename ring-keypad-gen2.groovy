@@ -107,6 +107,7 @@ metadata {
         attribute 'armAwayDelay', 'NUMBER'
         attribute 'armHomeDelay', 'NUMBER'
         attribute 'armNightDelay', 'NUMBER'
+        attribute 'batteryStatus', 'ENUM', ['charging', 'discharging', 'maintaining']
         attribute 'lastCodeName', 'STRING'
         attribute 'lastCodeTime', 'STRING'
         attribute 'lastCodeEpochms', 'NUMBER'
@@ -890,7 +891,7 @@ void zwaveEvent(hubitat.zwave.commands.batteryv2.BatteryReport cmd) {
     }
     eventProcess(levelEvt)
 
-    Map chargingEvt = [name: 'batteryStatus', value: BATTERY_STATUS_MAP[cmd.chargingStatus], descriptionText: "${device.displayName} battery is ${BATTERY_STATUS_MAP[cmd.chargingStatus]}" isStateChange: true]
+    Map chargingEvt = [name: 'batteryStatus', value: BATTERY_STATUS_MAP[cmd.chargingStatus], descriptionText: "${device.displayName} battery is ${BATTERY_STATUS_MAP[cmd.chargingStatus]}", isStateChange: true]
     eventProcess(chargingEvt)
 }
 
