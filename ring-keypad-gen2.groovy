@@ -32,6 +32,7 @@ import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVE
 import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_ARM_AWAY
 import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_ARM_HOME
 import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_CACHED_KEYS
+import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_CACHING
 import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_DISARM_ALL
 import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_ENTER
 import static hubitat.zwave.commands.entrycontrolv1.EntryControlNotification.EVENT_TYPE_FIRE
@@ -1114,6 +1115,9 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
             break
         // Code sent after hitting the Check Mark
         case EVENT_TYPE_ENTER:
+            if (logEnable) {
+                log.debug 'EntryControlNotification | Generic Code Enter (Check Mark)'
+            }
             state.type = 'physical'
             Date now = new Date()
             long ems = now.getTime()
@@ -1139,6 +1143,9 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
             }
             break
         case EVENT_TYPE_POLICE:
+            if (logEnable) {
+                log.debug 'EntryControlNotification | Police Button'
+            }
             state.type = 'physical'
             Date now = new Date()
             sendEvent(name:'lastCodeName', value: 'police', isStateChange:true)
@@ -1147,6 +1154,9 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
             sendEvent(name: 'held', value: 11, isStateChange: true)
             break
         case EVENT_TYPE_FIRE:
+            if (logEnable) {
+                log.debug 'EntryControlNotification | Fire Button'
+            }
             state.type = 'physical'
             Date now = new Date()
             sendEvent(name:'lastCodeName', value: 'fire', isStateChange:true)
@@ -1155,6 +1165,9 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
             sendEvent(name: 'held', value: 12, isStateChange: true)
             break
         case EVENT_TYPE_ALERT_MEDICAL:
+            if (logEnable) {
+                log.debug 'EntryControlNotification | Medical Button'
+            }
             state.type = 'physical'
             Date now = new Date()
             sendEvent(name:'lastCodeName', value: 'medical', isStateChange:true)
@@ -1164,8 +1177,16 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
             break
         // Button pressed or held, idle timeout reached without explicit submission
         case EVENT_TYPE_CACHED_KEYS:
+            if (logEnable) {
+                log.debug 'EntryControlNotification | Cached Keys'
+            }
             state.type = 'physical'
             handleButtons(code)
+            break
+        case EVENT_TYPE_CACHING:
+            if (logEnable) {
+                log.debug 'EntryControlNotification | Caching - Ignoring event.'
+            }
             break
     }
 }
@@ -1350,6 +1371,9 @@ private void sendSoundCommand(soundIndicatorId, volume) {
 }
 
 private void notifyInvalidCode() {
+    if (logEnable) {
+        log.debug "notifyInvalidCode | raising invalid code indicator"
+    }
     sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:INDICATOR_TYPE_CODE_REJECTED, propertyId:2, value:0xFF]]).format())
 }
 
