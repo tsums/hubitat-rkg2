@@ -147,7 +147,7 @@ metadata {
 // There are PDFs online, but they appear to have some incorrect parameter numbers.
 // The most accurate source was from zwae.eu, archived: https://archive.is/WbF5G
 @Field static Map configParams = [
-    15: [input: [name: 'configParam15', type: 'bool', title: 'Proximity Sensor', description: 'Controls the proximity sensor and accompanying motion reports.', defaultValue: true], parameterSize:1],
+    15: [input: [name: 'configParam15', type: 'number', title: 'Proximity Sensor', description: 'Controls the proximity sensor and accompanying motion reports. (1=on, 0=off)', defaultValue: 1, range:'0..1'], parameterSize:1],
     7: [input: [name: 'configParam7', type: 'number', title: 'Long press Emergency Duration', description:'', defaultValue: 3, range:'2..5'], parameterSize:1],
     8: [input: [name: 'configParam8', type: 'number', title: 'Long press Number pad Duration', description:'', defaultValue: 3, range:'2..5'], parameterSize:1],
     10: [input: [name: 'configParam10', type: 'number', title: 'Button Press Display Timeout', description:'Timeout in seconds when any button is pressed', defaultValue: 5, range:'0..30'], parameterSize:1],
@@ -258,6 +258,7 @@ void configure() {
     }
     keypadUpdateStatus(state.keypadStatus, state.type, state.code)
     runIn(5, pollDeviceData)
+    runIn(15, pollConfigs)
 }
 
 void refresh() {
@@ -750,8 +751,9 @@ void deleteCode(codeposition) {
 
 List<String> runConfigs() {
     List<String> cmds = []
+    logDebug("runConfigs | settings: ${settings}")
     configParams.each { param, data ->
-        if (settings[data.input.name]) {
+        if (settings.containsKey(data.input.name)) {
             logDebug("runConfigs | Set parameter: ${param} to ${settings[data.input.name]}")
             cmds.addAll(configCmd(param, data.parameterSize, settings[data.input.name]))
         }
