@@ -1,5 +1,5 @@
 /*
-    Ring Keypad Gen 2 - HSM Driver
+    Ring Keypad Gen 2 - HSM Driver by @tsums.
 
     Copyright 2020 -> 2021 Hubitat Inc.  All Rights Reserved
     Special Thanks to Bryan Copeland (@bcopeland) for writing and releasing this code to the community!
@@ -7,6 +7,7 @@
     Note: This fork of the community driver only supports HSM integration. The keypad will **not** change
           state on its own, it expects callbacks from HSM to correctly perform state transitions.
 
+    1.4.1 - 03/20/26 - Fix typos in logs and consolidate some internal business logic - @tsums
     1.4.0 - 10/28/25 - Format code, improve comments and debug logging, improve function naming and
                        variable names. Improve HSM integration and fix misc. bugs. Add chime capability. 
                        Improve readability and fetching power status. - @tsums
@@ -251,6 +252,11 @@ void initializeVars() {
     state.initialized = true
 }
 
+private void normalizeCodeAndType() {
+    state.code = state.code ?: ''
+    state.type = state.type ?: 'physical'
+}
+
 void configure() {
     logDebug('configure()')
     if (!state.initialized || !state.keypadConfig) {
@@ -303,7 +309,12 @@ private void keypadUpdateStatus(Integer status, String type='digital', String co
         type = 'physical'
     }
     // TODO figure out if I can remove the Short cast??? Maps are annoying.
-    eventProcess(name: 'securityKeypad', value: armingStates[status as Short].securityKeypadState, type: type, data: state.code)
+    def stateMap = armingStates[status as Short]
+    if (stateMap) {
+        eventProcess(name: 'securityKeypad', value: stateMap.securityKeypadState, type: type, data: state.code)
+    } else {
+        log.warn("keypadUpdateStatus | unknown indicator status: ${status}")
+    }
     state.code = ''
     state.type = 'digital'
 }
@@ -356,7 +367,7 @@ void setCodeLength(pincodelength) {
 
 // Used by HSM to configure the partial button arming function.
 void setPartialFunction(mode = null) {
-    logDebug("In setPartialFucntion (${version()}) - mode: ${mode}")
+    logDebug("In setPartialFunction (${version()}) - mode: ${mode}")
     if (!(mode in ['armHome', 'armNight'])) {
         log.warn "Custom command used by HSM: ${mode}"
     } else if (mode in ['armHome', 'armNight']) {
@@ -432,12 +443,7 @@ void armAway(delay=state.keypadConfig.armAwayDelay) {
 }
 
 void armAwayEnd() {
-    if (!state.code) {
-        state.code = ''
-    }
-    if (!state.type) {
-        state.type = 'physical'
-    }
+    normalizeCodeAndType()
     def sk = device.currentValue('securityKeypad')
     logDebug("armAwayEnd | sk: ${sk} code: ${state.code} type: ${state.type} delay: ${delay}")
     if (sk != SECURITY_KEYPAD_ARMED_AWAY) {
@@ -496,12 +502,7 @@ void armHome(delay = state.keypadConfig.armHomeDelay) {
 }
 
 void armHomeEnd() {
-    if (!state.code) {
-        state.code = ''
-    }
-    if (!state.type) {
-        state.type = 'physical'
-    }
+    normalizeCodeAndType()
     def sk = device.currentValue('securityKeypad')
     logDebug("armHomeEnd | sk: ${sk} code: ${state.code} type: ${state.type} delay: ${delay}")
     if (sk != SECURITY_KEYPAD_ARMED_HOME) {
@@ -523,12 +524,7 @@ void disarm(delay=0) {
     logDebug("disarm | delay: ${delay}")
     logDebug("disarm | sk: ${sk}")
     if (sk != SECURITY_KEYPAD_DISARMED) {
-        if (!state.code) {
-            state.code = ''
-        }
-        if (!state.type) {
-            state.type = 'physical'
-        }
+        normalizeCodeAndType()
 
         logDebug("disarm | disarming HSM and clearing keypad state")
         sendLocationEvent(name: 'hsmSetArm', value: 'disarm') // Disarm HSM
@@ -583,15 +579,14 @@ void entry(entranceDelay) {
 
 void playSound(soundnumber) {
     logDebug("playSound | sound: ${soundnumber}")
-    volSiren()
+    int playVolume = volSiren() // returns current siren vood and/or adjusted volume
 
     if (SOUND_EFFECTS_TO_INDICATOR_ID[soundnumber.intValue()]) {
         // Chime uses the siren volume. Maybe should use the announcement volume?
-        int playVolume = device.currentValue('volSiren') * 10
         logDebug("playSound | ${soundnumber} at volume ${playVolume}")
         sendSoundCommand(SOUND_EFFECTS_TO_INDICATOR_ID[soundnumber.intValue()], playVolume)
     } else {
-        log.warn "playSound | sound ${soundnumnber} unsupported."
+        log.warn "playSound | sound ${soundnumber} unsupported."
     }
     
 }
@@ -951,7 +946,7 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
                 logDebug("EntryControlNotification | Code Passed - currentStatus: ${currentStatus}")
                 if (currentStatus == 'disarmed') {
                     state.type = 'physical'
-                    state.keypadConfig.partialFunction = state.keypadConfig.partialFunctiob ?: 'armHome'
+                    state.keypadConfig.partialFunction = state.keypadConfig.partialFunction ?: 'armHome'
                     if (state.keypadConfig.partialFunction == 'armHome') {
                         logDebug("EntryControlNotification | Arming HOME mode, configured partialFunction: ${state.keypadConfig.partialFunction}")
                         logDebug("EntryControlNotification | Issuing armingIn event with delay ${state.keypadConfig.armHomeDelay}")
@@ -1124,14 +1119,15 @@ def volKeytone(newVol=null) {
 }
 
 def volSiren(newVol=null) {
-    logDebug("volKeytone | newVol: ${newVol}")
-    if (newVol) {
+    logDebug("volSiren | newVol: ${newVol}")
+    int sVol
+    if (newVol != null) {
         def currentVol = device.currentValue('volSiren')
         if (newVol.toString() == currentVol.toString()) {
-            logDebug("volKeytone | Siren Volume hasn't changed, so skipping")
-            def sVol = currentVol.toInteger() * 10
+            logDebug("volSiren | Siren Volume hasn't changed, so skipping")
+            sVol = (currentVol != null ? currentVol.toInteger() : 9) * 10
         } else {
-            logDebug("volKeytone | Setting the Siren Volume to $newVol")
+            logDebug("volSiren | Setting the Siren Volume to $newVol")
             sVol = newVol.toInteger() * 10
             sendToDevice(new hubitat.zwave.commands.configurationv1.ConfigurationSet(parameterNumber: 6, size: 1, scaledConfigurationValue: sVol).format())
             sendEvent(name:'volSiren', value: newVol, isStateChange:true)
@@ -1148,7 +1144,7 @@ def volSiren(newVol=null) {
 }
 
 def playTone(tone=null) {
-    volSiren()
+    int sVol = volSiren()
     logDebug("playTone | tone: ${tone}, volume: ${sVol}")
     if (!tone) {
         tone = theTone
