@@ -688,6 +688,43 @@ private Boolean keypadDisarmed() {
     return device.currentValue('securityKeypad') == SECURITY_KEYPAD_DISARMED
 }
 
+private Map getLockCodes() {
+    String lockCodes = device.currentValue('lockCodes')
+    if (!lockCodes) {
+        return [:]
+    }
+
+    String raw = lockCodes
+    if (optEncrypt && raw?.startsWith('{')) {
+        raw = decrypt(raw)
+    } else if (!optEncrypt && !raw?.startsWith('{')) {
+        // already decrypted
+        raw = raw
+    }
+
+    try {
+        return parseJson(raw) ?: [:]
+    } catch (e) {
+        log.warn "getLockCodes | Failed parsing lock codes: ${e}"
+        return [:]
+    }
+}
+
+private void setLockCodes(Map lockcodes) {
+    String payload = JsonOutput.toJson(lockcodes ?: [:])
+    sendEvent(name: 'lockCodes', value: optEncrypt ? encrypt(payload) : payload, isStateChange: true)
+}
+
+private void recordCodeMeta(String codeName, Boolean valid = null) {
+    Date now = new Date()
+    sendEvent(name:'lastCodeName', value: "${codeName}", isStateChange: true)
+    sendEvent(name:'lastCodeTime', value: "${now}", isStateChange: true)
+    sendEvent(name:'lastCodeEpochms', value: "${now.getTime()}", isStateChange: true)
+    if (valid != null) {
+        sendEvent(name:'validCode', value: valid ? 'true' : 'false', isStateChange: true)
+    }
+}
+
 private void emitArmingInEvent(String armMode, String armCmd, Integer delay) {
     Integer effectiveDelay = (delay != null && delay.toInteger() > 0) ? delay.toInteger() : 0
     // Emit the armingIn event with the effective delay and arm mode information. This allows HSM to handle both immediate and delayed arming scenarios appropriately.
@@ -718,6 +755,25 @@ private updateEncryption() {
 }
 
 private Boolean validatePin(String pincode) {
+    boolean validCode = false
+    Map lockcodes = getLockCodes()
+
+    lockcodes.each { String codeKey, Map codeMeta ->
+        if (codeMeta?.code == pincode) {
+            recordCodeMeta("${codeMeta.name}", true)
+            validCode = true
+
+            String payload = JsonOutput.toJson(["${codeKey}":[name: "${codeMeta.name}", code: "${codeMeta.code}", isInitiator: true]])
+            state.code = optEncrypt ? encrypt(payload) : payload
+        }
+    }
+
+    if (!validCode) {
+        recordCodeMeta('invalid', false)
+    }
+
+    return validCode
+}
     boolean validCode = false
     Map lockcodes = [:]
 
@@ -754,48 +810,26 @@ private Boolean validatePin(String pincode) {
 
 void setCode(codeposition, pincode, name) {
     logDebug("setCode | pos: ${codeposition}, code: ${pincode}, name: ${name})")
-    boolean newCode = true
-    Map lockcodes = [:]
-    if (device.currentValue('lockCodes') != null) {
-        if (optEncrypt) {
-            lockcodes = parseJson(decrypt(device.currentValue('lockCodes')))
-        } else {
-            lockcodes = parseJson(device.currentValue('lockCodes'))
-        }
-    }
-    if (lockcodes["${codeposition}"]) {
-        newCode = false
-    }
-    lockcodes["${codeposition}"] = ['code': "${pincode}", 'name': "${name}"]
-    if (optEncrypt) {
-        sendEvent(name: 'lockCodes', value: encrypt(JsonOutput.toJson(lockcodes)))
-    } else {
-        sendEvent(name: 'lockCodes', value: JsonOutput.toJson(lockcodes), isStateChange: true)
-    }
-    if (newCode) {
-        sendEvent(name: 'codeChanged', value:'added')
-    } else {
-        sendEvent(name: 'codeChanged', value: 'changed')
-    }
+    Map lockcodes = getLockCodes()
+    boolean isNewCode = !lockcodes.containsKey("${codeposition}")
+
+    lockcodes["${codeposition}"] = [code: "${pincode}", name: "${name}"]
+    setLockCodes(lockcodes)
+
+    sendEvent(name: 'codeChanged', value: isNewCode ? 'added' : 'changed')
 }
 
 void deleteCode(codeposition) {
     logDebug("deleteCode | code : ${codeposition}")
-    Map lockcodes = [:]
-    if (device.currentValue('lockCodes') != null) {
-        if (optEncrypt) {
-            lockcodes = parseJson(decrypt(device.currentValue('lockCodes')))
-        } else {
-            lockcodes = parseJson(device.currentValue('lockCodes'))
-        }
+    Map lockcodes = getLockCodes()
+
+    if (!lockcodes.containsKey("${codeposition}")) {
+        logDebug("deleteCode | code ${codeposition} not found")
+        return
     }
-    lockcodes["${codeposition}"] = [:]
+
     lockcodes.remove("${codeposition}")
-    if (optEncrypt) {
-        sendEvent(name: 'lockCodes', value: encrypt(JsonOutput.toJson(lockcodes)))
-    } else {
-        sendEvent(name: 'lockCodes', value: JsonOutput.toJson(lockcodes), isStateChange: true)
-    }
+    setLockCodes(lockcodes)
     sendEvent(name: 'codeChanged', value: 'deleted')
 }
 
@@ -976,8 +1010,6 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
         case EVENT_TYPE_ENTER:
             logDebug('EntryControlNotification | Generic Code Enter (Check Mark)')
             state.type = 'physical'
-            Date now = new Date()
-            long ems = now.getTime()
             if (!code) {
                 code = 'check mark'
             }
@@ -989,37 +1021,25 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
                     notifyInvalidCode()
                 }
             } else {
-                // Just emit the code as the last entered, but no validity specified.
-                sendEvent(name:'lastCodeName', value: "${code}", isStateChange:true)
-                sendEvent(name:'lastCodeTime', value: "${now}", isStateChange:true)
-                sendEvent(name:'lastCodeEpochms', value: "${ems}", isStateChange:true)
+                recordCodeMeta(code, null)
             }
             break
         case EVENT_TYPE_POLICE:
             logDebug('EntryControlNotification | Police Button')
             state.type = 'physical'
-            Date now = new Date()
-            sendEvent(name:'lastCodeName', value: 'police', isStateChange:true)
-            sendEvent(name:'lastCodeTime', value: "${now}", isStateChange:true)
-            sendEvent(name:'lastCodeEpochms', value: "${now.getTime()}", isStateChange:true)
+            recordCodeMeta('police', null)
             sendEvent(name: 'held', value: 11, isStateChange: true)
             break
         case EVENT_TYPE_FIRE:
             logDebug('EntryControlNotification | Fire Button')
             state.type = 'physical'
-            Date now = new Date()
-            sendEvent(name:'lastCodeName', value: 'fire', isStateChange:true)
-            sendEvent(name:'lastCodeTime', value: "${now}", isStateChange:true)
-            sendEvent(name:'lastCodeEpochms', value: "${now.getTime()}", isStateChange:true)
+            recordCodeMeta('fire', null)
             sendEvent(name: 'held', value: 12, isStateChange: true)
             break
         case EVENT_TYPE_ALERT_MEDICAL:
             logDebug('EntryControlNotification | Medical Button')
             state.type = 'physical'
-            Date now = new Date()
-            sendEvent(name:'lastCodeName', value: 'medical', isStateChange:true)
-            sendEvent(name:'lastCodeTime', value: "${now}", isStateChange:true)
-            sendEvent(name:'lastCodeEpochms', value: "${now.getTime()}", isStateChange:true)
+            recordCodeMeta('medical', null)
             sendEvent(name: 'held', value: 13, isStateChange: true)
             break
         // Button pressed or held, idle timeout reached without explicit submission
