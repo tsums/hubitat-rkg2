@@ -304,27 +304,36 @@ void pollDeviceData() {
     sendToDevice(cmds)
 }
 
+// NOTE: This central setter keeps device-level securityKeypad and alarm indicator state in sync.
+private void setKeypadSecurityStatus(Integer status, String type='digital', String code='') {
+    logDebug("setKeypadSecurityStatus | status: ${status} type: ${type} code: ${code}")
+
+    def statusMap = armingStates[status as Short]
+    if (!statusMap) {
+        log.warn("setKeypadSecurityStatus | unknown indicator status: ${status}")
+        return
+    }
+
+    state.code = code ?: ''
+    state.type = (state.code != '') ? 'physical' : type
+
+    sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount: 1, value: 0, indicatorValues: [[indicatorId:status, propertyId:2, value:0xFF]]).format())
+    state.keypadStatus = status
+
+    eventProcess(name: 'securityKeypad', value: statusMap.securityKeypadState, type: state.type, data: state.code)
+
+    // Reset temporary state payload after dispatch.
+    state.code = ''
+    state.type = 'digital'
+}
+
 // Updates the keypad indicator status. This will result in the keypad announcing the status e.g.
 // "Armed and Home", "Disarmed".
 // It would be better to only update the status if we knew it was different, but it seems like
 // The keypad doesn't let us poll for indicator status, it seems - All come back missing property 0x02
 // from the indicator report.
-private void keypadUpdateStatus(Integer status, String type='digital', String code) {
-    logDebug("keypadUpdateStatus | status: ${status} type: ${type}")
-    sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount: 1, value: 0, indicatorValues: [[indicatorId:status, propertyId:2, value:0xFF]]).format())
-    state.keypadStatus = status
-    if (state.code != '') {
-        type = 'physical'
-    }
-    // TODO figure out if I can remove the Short cast??? Maps are annoying.
-    def stateMap = armingStates[status as Short]
-    if (stateMap) {
-        eventProcess(name: 'securityKeypad', value: stateMap.securityKeypadState, type: type, data: state.code)
-    } else {
-        log.warn("keypadUpdateStatus | unknown indicator status: ${status}")
-    }
-    state.code = ''
-    state.type = 'digital'
+private void keypadUpdateStatus(Integer status, String type='digital', String code='') {
+    setKeypadSecurityStatus(status, type, code)
 }
 
 // -- Configuration functions. --
