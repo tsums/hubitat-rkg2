@@ -649,6 +649,26 @@ void getCodes() {
     updateEncryption()
 }
 
+private Boolean keypadDisarmed() {
+    return device.currentValue('securityKeypad') == SECURITY_KEYPAD_DISARMED
+}
+
+private void emitArmingInEvent(String armMode, String armCmd, Integer delay) {
+    Integer effectiveDelay = (delay != null && delay.toInteger() > 0) ? delay.toInteger() : 0
+    // Emit the armingIn event with the effective delay and arm mode information. This allows HSM to handle both immediate and delayed arming scenarios appropriately.
+    // If HSM fails to arm (e.g. due to bypass failure), then it won't come back and actually set the armed status of the keypad.
+    sendEvent(name:'armingIn', descriptionText: "Arming ${armMode} mode in ${effectiveDelay} delay", value: effectiveDelay, data:[armMode: armMode, armCmd: armCmd], isStateChange:true)
+}
+
+private void requestArmMode(String targetState, String hsmCmd, Integer delay) {
+    if (keypadDisarmed()) {
+        state.type = 'physical'
+        emitArmingInEvent(targetState, hsmCmd, delay)
+    } else {
+        logDebug("EntryControlNotification | Failed - Please Disarm Alarm before changing alarm type - currentStatus: ${device.currentValue('securityKeypad')}")
+    }
+}
+
 private updateEncryption() {
     String lockCodes = device.currentValue('lockCodes') // encrypted or decrypted
     if (lockCodes) {
@@ -924,17 +944,7 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
             logDebug('EntryControlNotification | Away Mode Button')
             if (validatePin(code) || instantArming) {
                 logDebug("EntryControlNotification | Code Passed - currentStatus: ${currentStatus}")
-                // Currently disarmed, trigger HSM mode change via event.
-                if (currentStatus == 'disarmed') {
-                    state.type = 'physical'
-                    state.keypadConfig.armAwayDelay = state.keypadConfig.armAwayDelay ? state.keypadConfig.armAwayDelay : 0
-                    logDebug("EntryControlNotification | Issuing armingIn event with delay ${state.keypadConfig.armAwayDelay}")
-                    // Indicate 'armingIn' event to HSM. HSM subscribes to this event and will call armAway() after the delay.
-                    // If arming fails (bypass failure etc), HSM will not call armAway and we'll return to normal.
-                    sendEvent(name:'armingIn', descriptionText: "Arming AWAY mode in ${state.keypadConfig.armAwayDelay} delay", value: state.keypadConfig.armAwayDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_AWAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_AWAY].hsmCmd], isStateChange:true)
-                } else {
-                    logDebug("EntryControlNotification | Failed - Please Disarm Alarm before changing alarm type - currentStatus: ${currentStatus}")
-                }
+                requestArmMode(armingStates[INDICATOR_TYPE_ARMED_AWAY].securityKeypadState, armingStates[INDICATOR_TYPE_ARMED_AWAY].hsmCmd, state.keypadConfig.armAwayDelay ?: 0)
             } else {
                 logDebug("EntryControlNotification | Failed - Invalid PIN - currentStatus: ${currentStatus}")
                 notifyInvalidCode()
@@ -944,18 +954,15 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
             logDebug('EntryControlNotification | Home Mode Button')
             if (validatePin(code) || instantArming) {
                 logDebug("EntryControlNotification | Code Passed - currentStatus: ${currentStatus}")
-                if (currentStatus == 'disarmed') {
-                    state.type = 'physical'
+                if (keypadDisarmed()) {
                     state.keypadConfig.partialFunction = state.keypadConfig.partialFunction ?: 'armHome'
                     if (state.keypadConfig.partialFunction == 'armHome') {
                         logDebug("EntryControlNotification | Arming HOME mode, configured partialFunction: ${state.keypadConfig.partialFunction}")
-                        logDebug("EntryControlNotification | Issuing armingIn event with delay ${state.keypadConfig.armHomeDelay}")
-                        state.keypadConfig.armHomeDelay = state.keypadConfig.armHomeDelay ? state.keypadConfig.armHomeDelay : 0
-                        // Indicate 'armingIn' event to HSM. HSM subscribes to this event and will call armHome() after the delay.
-                        // If arming fails (bypass failure etc), HSM will not call armAway and we'll return to normal.
-                        sendEvent(name:'armingIn', descriptionText: "Arming HOME mode in ${state.keypadConfig.armHomeDelay} delay", value: state.keypadConfig.armHomeDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_STAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_STAY].hsmCmd], isStateChange:true)
+                        requestArmMode(armingStates[INDICATOR_TYPE_ARMED_STAY].securityKeypadState, armingStates[INDICATOR_TYPE_ARMED_STAY].hsmCmd, state.keypadConfig.armHomeDelay ?: 0)
+                    } else if (state.keypadConfig.partialFunction == 'armNight') {
+                        // TODO: implement partial arm night mode
+                        logDebug('EntryControlNotification | armNight partialFunction request currently not implemented')
                     }
-                    // TODO: Fix armNight functionality.
                 } else {
                     logDebug("EntryControlNotification | Failed - Please Disarm Alarm before changing alarm type - currentStatus: ${currentStatus}")
                 }
@@ -968,10 +975,7 @@ void zwaveEvent(hubitat.zwave.commands.entrycontrolv1.EntryControlNotification c
             logDebug('EntryControlNotification | Disarm Mode Button')
             if (validatePin(code)) {
                 logDebug('EntryControlNotification | Code Passed')
-                logDebug("EntryControlNotification | Issuing armingIn event with delay ${0}")
-                state.type = 'physical'
-                // Indicate 'armingIn' event to HSM. HSM subscribes to this event and will call disarm().
-                sendEvent(name:'armingIn', value: 0, descriptionText: 'Disarming after valid code entry', data:[armMode: armingStates[INDICATOR_TYPE_DISARMED].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_DISARMED].hsmCmd], isStateChange:true)
+                requestArmMode(armingStates[INDICATOR_TYPE_DISARMED].securityKeypadState, armingStates[INDICATOR_TYPE_DISARMED].hsmCmd, 0)
             } else {
                 logDebug("EntryControlNotification | Failed - Invalid PIN - currentStatus: ${currentStatus}")
                 notifyInvalidCode()
