@@ -12,3 +12,15 @@ Note: This fork of the community driver **only supports HSM integration**. The k
 
 ### Known Issues
 * Arming via digital commands will trigger keypad state changes even if HSM declines to arm due to e.g. an open sensor.
+
+## Tests (hubitat_ci)
+This project now includes a Hubitat CI test harness.
+
+- `build.gradle`: Gradle build with `hubitat_ci` and `spock` test dependencies.
+- `src/test/groovy/RingKeypadGen2DriverSpec.groovy`: unit tests for init, arm states, and PIN validation.
+- `.github/workflows/ci.yml`: GitHub Actions to run `./gradlew clean test`.
+
+Run locally:
+```bash
+./gradlew clean test
+```

@@ -1,0 +1,45 @@
+plugins {
+    id 'groovy'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
+configurations.all {
+    resolutionStrategy.eachDependency { details ->
+        if (details.requested.group == 'org.codehaus.groovy') {
+            details.useVersion '3.0.21'
+        }
+    }
+}
+
+dependencies {
+    testImplementation 'me.eighty20results.hubitat_ci:hubitat_ci:0.28.6'
+    testImplementation 'org.spockframework:spock-core:2.3-groovy-3.0'
+}
+
+test {
+    useJUnitPlatform()
+    jvmArgs = [
+        '--add-exports', 'java.base/sun.util.calendar=ALL-UNNAMED',
+        '--add-opens', 'java.base/sun.util.calendar=ALL-UNNAMED'
+    ]
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+    }
+}
+
+tasks.withType(Test) {
+    jvmArgs += [
+        '--add-exports', 'java.base/sun.util.calendar=ALL-UNNAMED',
+        '--add-opens', 'java.base/sun.util.calendar=ALL-UNNAMED'
+    ]
+}
