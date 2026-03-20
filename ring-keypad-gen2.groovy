@@ -257,11 +257,19 @@ private void normalizeCodeAndType() {
     state.type = state.type ?: 'physical'
 }
 
+private void syncArmDelays() {
+    state.keypadConfig = state.keypadConfig ?: [:]
+    state.keypadConfig.armAwayDelay = armDelayFromStateOrAttr('armAwayDelay', state.keypadConfig.armAwayDelay ?: 0)
+    state.keypadConfig.armHomeDelay = armDelayFromStateOrAttr('armHomeDelay', state.keypadConfig.armHomeDelay ?: 0)
+    state.keypadConfig.armNightDelay = armDelayFromStateOrAttr('armNightDelay', state.keypadConfig.armNightDelay ?: 0)
+}
+
 void configure() {
     logDebug('configure()')
     if (!state.initialized || !state.keypadConfig) {
         initializeVars()
     }
+    syncArmDelays()
     keypadUpdateStatus(state.keypadStatus, state.type, state.code)
     runIn(5, pollDeviceData)
     runIn(15, pollConfigs)
@@ -339,21 +347,37 @@ void setExitDelay(delay) {
     state.keypadConfig.exitDelay = delay != null ? delay.toInteger() : 0
 }
 
+private Integer armDelayFromStateOrAttr(String name, Integer defaultValue = 0) {
+    def current = device.currentValue(name)
+    if (current != null && current.toString().isInteger()) {
+        return current.toInteger()
+    }
+    if (state.keypadConfig?.containsKey(name)) {
+        return state.keypadConfig[name].toInteger()
+    }
+    return defaultValue
+}
+
+private void setArmDelay(String name, def delay) {
+    Integer normalized = delay != null ? delay.toInteger() : 0
+    state.keypadConfig = state.keypadConfig ?: [:]
+    state.keypadConfig[name] = normalized
+    sendEvent(name:name, value:normalized, isStateChange:true)
+}
+
 void setArmNightDelay(delay) {
     logDebug("In setArmNightDelay (${version()}) - delay: ${delay}")
-    state.keypadConfig.armNightDelay = delay != null ? delay.toInteger() : 0
+    setArmDelay('armNightDelay', delay)
 }
 
 void setArmAwayDelay(delay) {
     logDebug("In setArmAwayDelay (${version()}) - delay: ${delay}")
-    sendEvent(name:'armAwayDelay', value: delay)
-    state.keypadConfig.armAwayDelay = delay != null ? delay.toInteger() : 0
+    setArmDelay('armAwayDelay', delay)
 }
 
 void setArmHomeDelay(delay) {
     logDebug("In setArmHomeDelay (${version()}) - delay: ${delay}")
-    sendEvent(name:'armHomeDelay', value: delay)
-    state.keypadConfig.armHomeDelay = delay != null ? delay.toInteger() : 0
+    setArmDelay('armHomeDelay', delay)
 }
 
 void setCodeLength(pincodelength) {
@@ -409,7 +433,8 @@ void armNightEnd() {
 // It is also possible to directly invoke a digital armAway command on the keypad.
 // This method needs to determine whether to invoke HSM, or if it was invoked _by_ HSM,
 // in order to avoid duplicate events.
-void armAway(delay=state.keypadConfig.armAwayDelay) {
+void armAway(delay = null) {
+    delay = delay != null ? delay.toInteger() : armDelayFromStateOrAttr('armAwayDelay', 0)
     def sk = device.currentValue('securityKeypad')
     def al = device.currentValue('alarm')
     logDebug("armAway | Delay: ${delay}")
@@ -456,7 +481,7 @@ void armAwayEnd() {
         if (state.type == 'digital') {
             // Send the HSM event indicating immediate arming.
             // TODO: Do we need this? It seems redundant, maybe it wouldn't have sent in armAway if digital and no delay?
-            sendEvent(name:'armingIn', value: state.keypadConfig.armAwayDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_AWAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_AWAY].hsmCmd], isStateChange:true)
+            sendEvent(name:'armingIn', value: armDelayFromStateOrAttr('armAwayDelay', 0), data:[armMode: armingStates[INDICATOR_TYPE_ARMED_AWAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_AWAY].hsmCmd], isStateChange:true)
         }
     }
 }
@@ -465,7 +490,8 @@ void armAwayEnd() {
 // It is also possible to directly invoke a digital armHome command on the keypad.
 // This method needs to determine whether to invoke HSM, or if it was invoked _by_ HSM,
 // in order to avoid duplicate events.
-void armHome(delay = state.keypadConfig.armHomeDelay) {
+void armHome(delay = null) {
+    delay = delay != null ? delay.toInteger() : armDelayFromStateOrAttr('armHomeDelay', 0)
     def sk = device.currentValue('securityKeypad')
     def al = device.currentValue('alarm')
     logDebug("armHome | delay: ${delay}")
@@ -514,7 +540,7 @@ void armHomeEnd() {
         if (state.type == 'digital') {
             // Send the HSM event indicating immediate arming.
             // TODO: Do we need this? It seems redundant, maybe it wouldn't have sent in armAway if digital and no delay?
-            sendEvent(name:'armingIn', value: state.keypadConfig.armHomeDelay, data:[armMode: armingStates[INDICATOR_TYPE_ARMED_STAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_STAY].hsmCmd], isStateChange:true)
+            sendEvent(name:'armingIn', value: armDelayFromStateOrAttr('armHomeDelay', 0), data:[armMode: armingStates[INDICATOR_TYPE_ARMED_STAY].securityKeypadState, armCmd: armingStates[INDICATOR_TYPE_ARMED_STAY].hsmCmd], isStateChange:true)
         }
     }
 }
