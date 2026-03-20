@@ -897,57 +897,13 @@ void zwaveEvent(hubitat.zwave.commands.versionv3.VersionReport cmd) {
 
 void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd) {
     logDebug("NotificationReport | ${cmd}")
-    Map evt = [:]
     if (cmd.notificationType == NOTIFICATION_TYPE_POWER_MANAGEMENT) {
-        switch (cmd.event) {
-            case AC_MAINS_DISCONNECTED:
-                evt.name = 'powerSource'
-                evt.value = 'battery'
-                evt.descriptionText = "${device.displayName} AC mains is disconnected"
-                eventProcess(evt)
-                break
-            case AC_MAINS_RECONNECTED:
-                evt.name = 'powerSource'
-                evt.value = 'mains'
-                evt.descriptionText = "${device.displayName} AC mains is re-connected"
-                eventProcess(evt)
-                break
-            case BATTERY_CHARGING:
-                logInfo("${device.displayName} Battery is charging")
-                break
-            case BATTERY_FULL:
-                logInfo("${device.displayName} Battery is fully charged")
-                break
-        }
-        // Request an updated battery report whenever we get a power management notification.
-        // This ensures we can keep `batteryStatus` up to date.
-        sendToDevice(zwave.batteryV2.batteryGet().format())
-    }
-    else if (cmd.notificationType == NOTIFICATION_TYPE_BURGLAR) {
-        if (cmd.event == MOTION_DETECTION) {
-            evt.name = 'motion'
-            evt.value = 'active'
-        } else if (cmd.event == STATE_IDLE && cmd.eventParameter[0] == MOTION_DETECTION) {
-            // Motion has cleared.
-            evt.name = 'motion'
-            evt.value = 'inactive'
-        } else if (cmd.event == 0 && cmd.notificationStatus == 255) {
-            // According to the manual, this is a "Dropped Frame" notification.
-            log.warn "NotificationReport | ${device.displayName} reports a dropped frame!."
-        } else if (cmd.event == 0 && cmd.notificationStatus == 0) {
-            log.info "NotificationReport | ${device.displayName} reports that dropped frames condition has cleared."
-        } else {
-            log.warn "NotificationReport | Unhandled (Security): ${cmd}"
-        }
-        if (evt.name) {
-            evt.descriptionText = "${device.displayName} ${evt.name} is ${evt.value}"
-            eventProcess(evt)
-        }
-    } else if (cmd.notificationType == NOTIFICATION_TYPE_SYSTEM && cmd.event == SYSTEM_SOFTWARE_FAILURE) {
-        // There are different kinds of faults documented in the manual.
-        log.warn "${device.displayName} reports a software fault: ${cmd.eventParameter[0]}: 0x${hubitat.helper.HexUtils.integerToHexString(cmd.eventParameter[0], 1)}."
-    }
-    else {
+        handlePowerManagementNotification(cmd.event)
+    } else if (cmd.notificationType == NOTIFICATION_TYPE_BURGLAR) {
+        handleBurglarNotification(cmd.event, cmd.notificationStatus, cmd.eventParameter)
+    } else if (cmd.notificationType == NOTIFICATION_TYPE_SYSTEM) {
+        handleSystemNotification(cmd.event, cmd.eventParameter)
+    } else {
         logDebug("NotificationReport | Unhandled: ${cmd}")
     }
 }
@@ -1229,6 +1185,57 @@ private void alarmStatusChangeNow() {
     Date now = new Date()
     sendEvent(name:'alarmStatusChangeTime', value: "${now}", isStateChange:true)
     sendEvent(name:'alarmStatusChangeEpochms', value: "${now.getTime()}", isStateChange:true)
+}
+
+private void processCoreEvent(String name, Object value, String description = null, String unit = null) {
+    Map evt = [name: name, value: value, isStateChange: true]
+    if (description) evt.descriptionText = description
+    if (unit) evt.unit = unit
+    eventProcess(evt)
+}
+
+private void handlePowerManagementNotification(int eventCode) {
+    switch (eventCode) {
+        case AC_MAINS_DISCONNECTED:
+            processCoreEvent('powerSource', 'battery', "${device.displayName} AC mains is disconnected")
+            break
+        case AC_MAINS_RECONNECTED:
+            processCoreEvent('powerSource', 'mains', "${device.displayName} AC mains is re-connected")
+            break
+        case BATTERY_CHARGING:
+            logInfo("${device.displayName} Battery is charging")
+            break
+        case BATTERY_FULL:
+            logInfo("${device.displayName} Battery is fully charged")
+            break
+        default:
+            logDebug("handlePowerManagementNotification | Unhandled event: ${eventCode}")
+            break
+    }
+    // Keep battery as up-to-date as possible when power status changes.
+    sendToDevice(zwave.batteryV2.batteryGet().format())
+}
+
+private void handleBurglarNotification(int event, int status, List eventParameter) {
+    if (event == MOTION_DETECTION) {
+        processCoreEvent('motion', 'active', "${device.displayName} motion is active")
+    } else if (event == STATE_IDLE && eventParameter && eventParameter[0] == MOTION_DETECTION) {
+        processCoreEvent('motion', 'inactive', "${device.displayName} motion is inactive")
+    } else if (event == 0 && status == 255) {
+        log.warn "NotificationReport | ${device.displayName} reports a dropped frame!."
+    } else if (event == 0 && status == 0) {
+        log.info "NotificationReport | ${device.displayName} reports that dropped frames condition has cleared."
+    } else {
+        log.warn "NotificationReport | Unhandled (Security): event=${event}, status=${status}"
+    }
+}
+
+private void handleSystemNotification(int event, List eventParameter) {
+    if (event == SYSTEM_SOFTWARE_FAILURE) {
+        log.warn "${device.displayName} reports a software fault: ${eventParameter[0]}: 0x${hubitat.helper.HexUtils.integerToHexString(eventParameter[0], 1)}."
+    } else {
+        logDebug("handleSystemNotification | Unhandled event: ${event}")
+    }
 }
 
 // Helpers to send commands to the devicde.
