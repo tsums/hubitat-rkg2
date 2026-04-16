@@ -311,7 +311,7 @@ private void keypadUpdateStatus(Integer status, String type='digital', String co
     // TODO figure out if I can remove the Short cast??? Maps are annoying.
     def stateMap = armingStates[status as Short]
     if (stateMap) {
-        eventProcess(name: 'securityKeypad', value: stateMap.securityKeypadState, type: type, data: state.code)
+        sendEventConditional(name: 'securityKeypad', value: stateMap.securityKeypadState, type: type, data: state.code)
     } else {
         log.warn("keypadUpdateStatus | unknown indicator status: ${status}")
     }
@@ -358,7 +358,7 @@ void setArmHomeDelay(delay) {
 
 void setCodeLength(pincodelength) {
     logDebug("In setCodeLength (${version()}) - pincodelength: ${pincodelength}")
-    eventProcess(name:'codeLength', value: pincodelength, descriptionText: "${device.displayName} codeLength set to ${pincodelength}")
+    sendEventConditional(name:'codeLength', value: pincodelength, descriptionText: "${device.displayName} codeLength set to ${pincodelength}")
     state.keypadConfig.codeLength = pincodelength
     // set zwave entry code key buffer
     // 6F06XX10
@@ -550,7 +550,7 @@ void exitDelay(delay) {
         // update state so that a disarm command during the exit delay resets the indicator lights
         state.keypadStatus = INDICATOR_TYPE_EXIT_DELAY
         type = state.code != '' ? 'physical' : 'digital'
-        eventProcess(name: 'securityKeypad', value: SECURITY_KEYPAD_EXIT_DELAY, type: type, data: state.code)
+        sendEventConditional(name: 'securityKeypad', value: SECURITY_KEYPAD_EXIT_DELAY, type: type, data: state.code)
         logDebug("exitDelay | type: ${type}")
     }
 }
@@ -764,13 +764,41 @@ void deleteCode(codeposition) {
     sendEvent(name: 'codeChanged', value: 'deleted')
 }
 
+// Consolidate volume commands
+private void setVolume(String attrName, int paramNumber, int newVol) {
+    if (newVol < 1 || newVol > 10) return
+    if (newVol == device.currentValue(attrName)?.toInteger()) return
+
+    logDebug("Setting ${attrName} to ${newVol}")
+    sendToDevice(zwave.configurationV1.configurationSet(parameterNumber: paramNumber, size: 1, scaledConfigurationValue: newVol).format())
+    sendEvent(name: attrName, value: newVol, isStateChange: true)
+}
+
+void volAnnouncement(newVol=null) {
+    if (newVol != null) setVolume('volAnnouncement', 4, newVol.toInteger())
+}
+
+void volKeytone(newVol=null) {
+    if (newVol != null) setVolume('volKeytone', 5, newVol.toInteger())
+}
+
+void volSiren(newVol=null) {
+    if (newVol != null) {
+        int sVol = newVol.toInteger()
+        setVolume('volSiren', 6, sVol)
+    }
+}
+
+// Optimized config helper
 List<String> runConfigs() {
     List<String> cmds = []
-    logDebug("runConfigs | settings: ${settings}")
     configParams.each { param, data ->
-        if (settings.containsKey(data.input.name)) {
-            logDebug("runConfigs | Set parameter: ${param} to ${settings[data.input.name]}")
-            cmds.addAll(configCmd(param, data.parameterSize, settings[data.input.name]))
+        def val = settings[data.input.name]
+        if (val != null) {
+            // Only send if different from current settings if possible,
+            // but for now, just iterate efficiently.
+            logDebug("runConfigs | Set parameter: ${param} to ${val}")
+            cmds.addAll(configCmd(param, data.parameterSize, val))
         }
     }
     return cmds
@@ -790,6 +818,16 @@ List<String> configCmd(parameterNumber, size, scaledConfigurationValue) {
     cmds.add(zwave.configurationV1.configurationSet(parameterNumber: parameterNumber.toInteger(), size: size.toInteger(), scaledConfigurationValue: scaledConfigurationValue.toInteger()).format())
     cmds.add(zwave.configurationV1.configurationGet(parameterNumber: parameterNumber.toInteger()).format())
     return cmds
+}
+
+// Helper for Indicator logic
+private int getIndicatorForState(String stateName) {
+    switch (stateName) {
+        case 'disarmed': return INDICATOR_TYPE_DISARMED
+        case 'armed home': return INDICATOR_TYPE_ARMED_STAY
+        case 'armed away': return INDICATOR_TYPE_ARMED_AWAY
+        default: return INDICATOR_TYPE_DISARMED
+    }
 }
 
 // Z-Wave Event Handling
@@ -824,10 +862,10 @@ void zwaveEvent(hubitat.zwave.commands.batteryv2.BatteryReport cmd) {
         levelEvt.value = cmd.batteryLevel
         levelEvt.descriptionText = "${device.displayName} battery is ${levelEvt.value}${levelEvt.unit}"
     }
-    eventProcess(levelEvt)
+    sendEventConditional(levelEvt)
 
     Map chargingEvt = [name: 'batteryStatus', value: BATTERY_STATUS_MAP[cmd.chargingStatus], descriptionText: "${device.displayName} battery is ${BATTERY_STATUS_MAP[cmd.chargingStatus]}", isStateChange: true]
-    eventProcess(chargingEvt)
+    sendEventConditional(chargingEvt)
 }
 
 void zwaveEvent(hubitat.zwave.commands.manufacturerspecificv2.DeviceSpecificReport cmd) {
@@ -869,13 +907,13 @@ void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd) {
                 evt.name = 'powerSource'
                 evt.value = 'battery'
                 evt.descriptionText = "${device.displayName} AC mains is disconnected"
-                eventProcess(evt)
+                sendEventConditional(evt)
                 break
             case AC_MAINS_RECONNECTED:
                 evt.name = 'powerSource'
                 evt.value = 'mains'
                 evt.descriptionText = "${device.displayName} AC mains is re-connected"
-                eventProcess(evt)
+                sendEventConditional(evt)
                 break
             case BATTERY_CHARGING:
                 logInfo("${device.displayName} Battery is charging")
@@ -906,7 +944,7 @@ void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd) {
         }
         if (evt.name) {
             evt.descriptionText = "${device.displayName} ${evt.name} is ${evt.value}"
-            eventProcess(evt)
+            sendEventConditional(evt)
         }
     } else if (cmd.notificationType == NOTIFICATION_TYPE_SYSTEM && cmd.event == SYSTEM_SOFTWARE_FAILURE) {
         // There are different kinds of faults documented in the manual.
@@ -1088,65 +1126,6 @@ void parse(String event) {
     }
 }
 
-def volAnnouncement(newVol=null) {
-    logDebug("volAnnouncement | newVol: ${newVol}")
-    if (newVol) {
-        def currentVol = device.currentValue('volAnnouncement')
-        if (newVol.toString() == currentVol.toString()) {
-            logDebug("volAnnouncement | Announcement Volume hasn't changed, so skipping")
-        } else {
-            logDebug("volAnnouncement | Setting the Announcement Volume to $newVol")
-            nVol = newVol.toInteger()
-            sendToDevice(new hubitat.zwave.commands.configurationv1.ConfigurationSet(parameterNumber: 4, size: 1, scaledConfigurationValue: nVol).format())
-            sendEvent(name:'volAnnouncement', value: newVol, isStateChange:true)
-        }
-    } else {
-        logDebug('volAnnouncement | Announcement value not specified, so skipping')
-    }
-}
-
-def volKeytone(newVol=null) {
-    logDebug("volKeytone | newVol: ${newVol}")
-    if (newVol) {
-        def currentVol = device.currentValue('volKeytone')
-        if (newVol.toString() == currentVol.toString()) {
-            logDebug("volKeytone | Keytone Volume hasn't changed, so skipping")
-        } else {
-            logDebug("volKeytone | Setting the Keytone Volume to $newVol")
-            nVol = newVol.toInteger()
-            sendToDevice(new hubitat.zwave.commands.configurationv1.ConfigurationSet(parameterNumber: 5, size: 1, scaledConfigurationValue: nVol).format())
-            sendEvent(name:'volKeytone', value: newVol, isStateChange:true)
-        }
-    } else {
-        logDebug('volKeytone | Keytone value not specified, so skipping')
-    }
-}
-
-def volSiren(newVol=null) {
-    logDebug("volSiren | newVol: ${newVol}")
-    int sVol
-    if (newVol != null) {
-        def currentVol = device.currentValue('volSiren')
-        if (newVol.toString() == currentVol.toString()) {
-            logDebug("volSiren | Siren Volume hasn't changed, so skipping")
-            sVol = (currentVol != null ? currentVol.toInteger() : 9) * 10
-        } else {
-            logDebug("volSiren | Setting the Siren Volume to $newVol")
-            sVol = newVol.toInteger() * 10
-            sendToDevice(new hubitat.zwave.commands.configurationv1.ConfigurationSet(parameterNumber: 6, size: 1, scaledConfigurationValue: sVol).format())
-            sendEvent(name:'volSiren', value: newVol, isStateChange:true)
-        }
-    } else {
-        def currentVol = device.currentValue('volSiren')
-        if (currentVol) {
-            sVol = currentVol.toInteger() * 10
-        } else {
-            sVol = 90
-        }
-    }
-    return sVol
-}
-
 def playTone(tone=null) {
     int sVol = volSiren()
     logDebug("playTone | tone: ${tone}, volume: ${sVol}")
@@ -1220,11 +1199,12 @@ private List<String> setDefaultAssociation() {
     return cmds
 }
 
-// Event filter - only emit an event if it represents a change from the current state.
-private void eventProcess(Map evt) {
+// Standardized event emitter
+private void sendEventConditional(Map evt) {
     if (evt.descriptionText) {
         logInfo("${evt.descriptionText}")
     }
+    // Only send if value changed
     if (device.currentValue(evt.name).toString() != evt.value.toString()) {
         sendEvent(evt)
     }
