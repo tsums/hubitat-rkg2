@@ -220,7 +220,7 @@ void updated() {
     if (logEnable) {
         runIn(3600, logsOff)
     }
-    sendToDevice(runConfigs())
+    sendToDevice(runConfigs(settings))
     updateEncryption()
     volAnnouncement()
     volKeytone()
@@ -286,13 +286,13 @@ void pollDeviceData() {
     cmds.add(zwave.notificationV8.notificationGet(notificationType: NOTIFICATION_TYPE_POWER_MANAGEMENT, event: BATTERY_CHARGING).format())
     cmds.add(zwave.notificationV8.notificationGet(notificationType: NOTIFICATION_TYPE_POWER_MANAGEMENT, event: BATTERY_FULL).format())
     cmds.add(zwave.notificationV8.notificationGet(notificationType: NOTIFICATION_TYPE_BURGLAR, event: 0).format())
-    // TODO: Trying to figure out if it will tell us the state of the indicators, but it seems like ... no?
-    // All of the reports that come back are missing property 2...
-    cmds.add(zwave.indicatorV3.indicatorGet(indicatorId: INDICATOR_TYPE_ALARM).format())
-    cmds.add(zwave.indicatorV3.indicatorGet(indicatorId: INDICATOR_TYPE_DISARMED).format())
-    cmds.add(zwave.indicatorV3.indicatorGet(indicatorId: INDICATOR_TYPE_ARMED_AWAY).format())
-    cmds.add(zwave.indicatorV3.indicatorGet(indicatorId: INDICATOR_TYPE_ARMED_STAY).format())
-    cmds.add(zwave.indicatorV3.indicatorSupportedGet(indicatorId: INDICATOR_TYPE_DISARMED).format())
+    // // TODO: Trying to figure out if it will tell us the state of the indicators, but it seems like ... no?
+    // // All of the reports that come back are missing property 2...
+    // cmds.add(zwave.indicatorV3.indicatorGet(indicatorId: INDICATOR_TYPE_ALARM).format())
+    // cmds.add(zwave.indicatorV3.indicatorGet(indicatorId: INDICATOR_TYPE_DISARMED).format())
+    // cmds.add(zwave.indicatorV3.indicatorGet(indicatorId: INDICATOR_TYPE_ARMED_AWAY).format())
+    // cmds.add(zwave.indicatorV3.indicatorGet(indicatorId: INDICATOR_TYPE_ARMED_STAY).format())
+    // cmds.add(zwave.indicatorV3.indicatorSupportedGet(indicatorId: INDICATOR_TYPE_DISARMED).format())
     sendToDevice(cmds)
 }
 
@@ -579,14 +579,13 @@ void entry(entranceDelay) {
 
 void playSound(soundnumber) {
     logDebug("playSound | sound: ${soundnumber}")
-    int playVolume = volSiren() // returns current siren vood and/or adjusted volume
+    int playVolume = volAnnouncement() // Use announcement volume for sound playback.
 
-    if (SOUND_EFFECTS_TO_INDICATOR_ID[soundnumber.intValue()]) {
-        // Chime uses the siren volume. Maybe should use the announcement volume?
+    if (soundnumber != null && SOUND_EFFECTS_TO_INDICATOR_ID[soundnumber.toInteger()]) {
         logDebug("playSound | ${soundnumber} at volume ${playVolume}")
-        sendSoundCommand(SOUND_EFFECTS_TO_INDICATOR_ID[soundnumber.intValue()], playVolume)
+        sendSoundCommand(SOUND_EFFECTS_TO_INDICATOR_ID[soundnumber.toInteger()], playVolume)
     } else {
-        log.warn "playSound | sound ${soundnumber} unsupported."
+        log.warn "playSound | sound ${soundnumber} unsupported or null."
     }
     
 }
@@ -608,7 +607,8 @@ void both() {
 
 void siren() {
     changeStatus('siren')
-    sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:INDICATOR_TYPE_ALARM, propertyId:2, value:0xFF]]).format())
+    int vol = volSiren()
+    sendToDevice(zwave.indicatorV3.indicatorSet(indicatorCount:1, value: 0, indicatorValues:[[indicatorId:INDICATOR_TYPE_ALARM, propertyId:2, value:vol]]).format())
 }
 
 void strobe() {
@@ -661,11 +661,11 @@ private void emitArmingInEvent(String armMode, String armCmd, Integer delay) {
 }
 
 private void requestArmMode(String targetState, String hsmCmd, Integer delay) {
-    if (keypadDisarmed()) {
+    if (keypadDisarmed() || targetState == SECURITY_KEYPAD_DISARMED) {
         state.type = 'physical'
         emitArmingInEvent(targetState, hsmCmd, delay)
     } else {
-        logDebug("EntryControlNotification | Failed - Please Disarm Alarm before changing alarm type - currentStatus: ${device.currentValue('securityKeypad')}")
+        logDebug("requestArmMode | Failed - Please Disarm Alarm before changing alarm type - currentStatus: ${device.currentValue('securityKeypad')}")
     }
 }
 
@@ -774,31 +774,40 @@ private void setVolume(String attrName, int paramNumber, int newVol) {
     sendEvent(name: attrName, value: newVol, isStateChange: true)
 }
 
-void volAnnouncement(newVol=null) {
+def volAnnouncement(newVol=null) {
     if (newVol != null) setVolume('volAnnouncement', 4, newVol.toInteger())
+    // The keypad expects volumes from 0..100
+    return (device.currentValue('volAnnouncement')?.toInteger() ?: 8) * 10
 }
 
-void volKeytone(newVol=null) {
+def volKeytone(newVol=null) {
     if (newVol != null) setVolume('volKeytone', 5, newVol.toInteger())
+    // The keypad expects volumes from 0..100
+    return (device.currentValue('volKeytone')?.toInteger() ?: 8) * 10
 }
 
-void volSiren(newVol=null) {
-    if (newVol != null) {
-        int sVol = newVol.toInteger()
-        setVolume('volSiren', 6, sVol)
-    }
+def volSiren(newVol=null) {
+    if (newVol != null) setVolume('volSiren', 6, newVol.toInteger())
+    // The keypad expects volumes from 0..100
+    return (device.currentValue('volSiren')?.toInteger() ?: 8) * 10
 }
 
-// Optimized config helper
-List<String> runConfigs() {
+// Emits configuration commans for any config settings which have changed.
+List<String> runConfigs(Map currentSettings) {
+    if (!state.appliedConfigs) state.appliedConfigs = [:]
     List<String> cmds = []
+
     configParams.each { param, data ->
-        def val = settings[data.input.name]
-        if (val != null) {
-            // Only send if different from current settings if possible,
-            // but for now, just iterate efficiently.
-            logDebug("runConfigs | Set parameter: ${param} to ${val}")
-            cmds.addAll(configCmd(param, data.parameterSize, val))
+        def settingName = data.input.name
+        def newValue = currentSettings[settingName]
+
+        // Check if setting exists and if it differs from our last known "applied" state
+        if (newValue != null && newValue != state.appliedConfigs[settingName]) {
+            logDebug("runConfigs | Setting ${settingName} changed from ${state.appliedConfigs[settingName]} to ${newValue}. Sending command.")
+            cmds.addAll(configCmd(param, data.parameterSize, newValue))
+
+            // Update our tracker
+            state.appliedConfigs[settingName] = newValue
         }
     }
     return cmds
@@ -1098,7 +1107,7 @@ void zwaveEvent(hubitat.zwave.Command cmd) {
 
 void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation cmd) {
     logDebug("SecurityMessageEncapsulation | ${cmd}")
-    hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(CMD_CLASS_VERS)
+    def encapsulatedCommand = cmd.encapsulatedCommand(CMD_CLASS_VERS)
     if (encapsulatedCommand) {
         logDebug("SecurityMessageEncapsulation | Processing encapsulated: ${encapsulatedCommand}")
         zwaveEvent(encapsulatedCommand)
@@ -1108,7 +1117,7 @@ void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation c
 void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
     logDebug("SupervisionGet | ${cmd}")
 
-    hubitat.zwave.Command encapsulatedCommand = cmd.encapsulatedCommand(CMD_CLASS_VERS)
+    def encapsulatedCommand = cmd.encapsulatedCommand(CMD_CLASS_VERS)
     if (encapsulatedCommand) {
         logDebug("SupervisionGet | Processing encapsulated: ${encapsulatedCommand}")
         zwaveEvent(encapsulatedCommand)
@@ -1119,6 +1128,7 @@ void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
 }
 
 void parse(String event) {
+    // Note: Map cast errors seem to be a problem with current ZWaveJS implementstion of the indicator command class?
     logDebug("parse | ${event}")
     hubitat.zwave.Command cmd = zwave.parse(event, CMD_CLASS_VERS)
     if (cmd) {
@@ -1127,7 +1137,7 @@ void parse(String event) {
 }
 
 def playTone(tone=null) {
-    int sVol = volSiren()
+    int sVol = volAnnouncement()
     logDebug("playTone | tone: ${tone}, volume: ${sVol}")
     if (!tone) {
         tone = theTone
@@ -1190,7 +1200,6 @@ private List<String> commands(List<String> cmds, Long delay=300) {
 }
 
 // General Utility Methods
-
 // Generate association group commands for Group 1 to associate to the hub.
 private List<String> setDefaultAssociation() {
     List<String> cmds = []
